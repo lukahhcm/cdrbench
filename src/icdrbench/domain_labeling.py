@@ -15,10 +15,17 @@ from icdrbench.support_scan import normalize_record, run_filter, run_mapper
 
 def iter_jsonl(path: Path) -> Iterator[Dict[str, Any]]:
     with open(path, 'r', encoding='utf-8') as f:
-        for line in f:
+        for lineno, line in enumerate(f, start=1):
             line = line.strip()
             if line:
-                yield json.loads(line)
+                try:
+                    yield json.loads(line)
+                except json.JSONDecodeError as exc:
+                    preview = line[:200]
+                    raise ValueError(
+                        f'Invalid JSONL record in {path} at line {lineno}: {exc.msg}. '
+                        f'Line preview: {preview!r}'
+                    ) from exc
 
 
 def _stable_json(payload: Dict[str, Any]) -> str:
@@ -358,12 +365,19 @@ def process_corpus(
     resume_from_records = 0
     if resume and tagged_path.exists():
         with open(tagged_path, 'r', encoding='utf-8') as existing_tagged:
-            for line in existing_tagged:
+            for lineno, line in enumerate(existing_tagged, start=1):
                 line = line.strip()
                 if not line:
                     continue
                 resume_from_records += 1
-                payload = json.loads(line)
+                try:
+                    payload = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    preview = line[:200]
+                    raise ValueError(
+                        f'Invalid JSONL record in {tagged_path} at line {lineno}: {exc.msg}. '
+                        f'Line preview: {preview!r}'
+                    ) from exc
                 active_count = int(payload.get('active_mapper_count', 0) or 0)
                 active_mapper_total += active_count
                 if payload.get('skipped_long_text'):

@@ -27,10 +27,17 @@ EXPENSIVE_LONG_TEXT_MAPPERS = {
 def load_jsonl(path: Path) -> List[Dict[str, Any]]:
     records = []
     with open(path, 'r', encoding='utf-8') as f:
-        for line in f:
+        for lineno, line in enumerate(f, start=1):
             line = line.strip()
             if line:
-                records.append(json.loads(line))
+                try:
+                    records.append(json.loads(line))
+                except json.JSONDecodeError as exc:
+                    preview = line[:200]
+                    raise ValueError(
+                        f'Invalid JSONL record in {path} at line {lineno}: {exc.msg}. '
+                        f'Line preview: {preview!r}'
+                    ) from exc
     return records
 
 

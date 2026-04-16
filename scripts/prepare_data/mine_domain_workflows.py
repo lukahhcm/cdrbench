@@ -23,10 +23,17 @@ from icdrbench.config import load_domains_config
 
 def iter_jsonl(path: Path) -> Iterable[dict[str, Any]]:
     with path.open('r', encoding='utf-8') as f:
-        for line in f:
+        for lineno, line in enumerate(f, start=1):
             line = line.strip()
             if line:
-                yield json.loads(line)
+                try:
+                    yield json.loads(line)
+                except json.JSONDecodeError as exc:
+                    preview = line[:200]
+                    raise ValueError(
+                        f'Invalid JSONL record in {path} at line {lineno}: {exc.msg}. '
+                        f'Line preview: {preview!r}'
+                    ) from exc
 
 
 def _normalize_ops(values: list[str]) -> tuple[str, ...]:
