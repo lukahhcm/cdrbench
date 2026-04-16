@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+import ast
+import csv
 import gzip
 import io
 import json
@@ -486,6 +488,114 @@ def iter_pii_records(
             }
 
 
+def iter_docpii_records(
+    in_path: Path,
+    *,
+    source_name: str,
+    source_type: str,
+    limit: int | None,
+) -> Iterator[dict[str, object]]:
+    with open(in_path, 'r', encoding='utf-8') as f:
+        payload = json.load(f)
+
+    uid_map = payload.get('uid', {})
+    text_map = payload.get('text', {})
+    entities_map = payload.get('entities', {})
+    entity_count_map = payload.get('entity_count', {})
+    document_type_map = payload.get('document_type', {})
+    domain_map = payload.get('domain', {})
+    document_description_map = payload.get('document_description', {})
+    redaction_query_map = payload.get('redaction_query', {})
+
+    if not isinstance(uid_map, dict) or not isinstance(text_map, dict):
+        return
+
+    count = 0
+    for row_key in sorted(uid_map.keys(), key=lambda x: int(x) if str(x).isdigit() else str(x)):
+        if limit is not None and count >= limit:
+            break
+        text = text_map.get(row_key)
+        if not isinstance(text, str) or not text.strip():
+            continue
+
+        uid = uid_map.get(row_key)
+        if not isinstance(uid, str) or not uid:
+            uid = str(row_key)
+
+        entities = entities_map.get(row_key)
+        if not isinstance(entities, list):
+            entities = None
+
+        entity_count = entity_count_map.get(row_key)
+        if not isinstance(entity_count, int):
+            entity_count = len(entities) if isinstance(entities, list) else None
+
+        yield {
+            'id': f'{source_name}-{uid}',
+            'source_name': source_name,
+            'source_type': source_type,
+            'url': None,
+            'text': text,
+            'meta': {
+                'uid': uid,
+                'row_key': row_key,
+                'entities': entities,
+                'entity_count': entity_count,
+                'document_type': document_type_map.get(row_key),
+                'domain': domain_map.get(row_key),
+                'document_description': document_description_map.get(row_key),
+                'redaction_query': redaction_query_map.get(row_key),
+                'output_mode': 'plain_text',
+                'text_field': 'text',
+            },
+        }
+        count += 1
+
+
+def iter_synthetic_text_anonymizer_records(
+    in_path: Path,
+    *,
+    source_name: str,
+    source_type: str,
+    limit: int | None,
+) -> Iterator[dict[str, object]]:
+    with open(in_path, 'r', encoding='utf-8', newline='') as f:
+        reader = csv.DictReader(f)
+        count = 0
+        for row_idx, row in enumerate(reader):
+            if limit is not None and count >= limit:
+                break
+            text = row.get('text')
+            if not isinstance(text, str) or not text.strip():
+                continue
+
+            labels_raw = row.get('labels')
+            labels = None
+            if isinstance(labels_raw, str) and labels_raw.strip():
+                try:
+                    parsed = ast.literal_eval(labels_raw)
+                    if isinstance(parsed, list):
+                        labels = parsed
+                except (ValueError, SyntaxError):
+                    labels = None
+
+            yield {
+                'id': f'{source_name}-{row_idx}',
+                'source_name': source_name,
+                'source_type': source_type,
+                'url': None,
+                'text': text,
+                'meta': {
+                    'row_idx': row_idx,
+                    'labels': labels,
+                    'label_count': len(labels) if isinstance(labels, list) else None,
+                    'output_mode': 'plain_text',
+                    'text_field': 'text',
+                },
+            }
+            count += 1
+
+
 def decode_text_bytes(data: bytes) -> str:
     for encoding in ('utf-8', 'latin-1', 'cp1252'):
         try:
@@ -640,6 +750,28 @@ def build_parser() -> argparse.ArgumentParser:
     pii.add_argument('--source-name', default='pii-43k')
     pii.add_argument('--source-type', default='local_pii_redaction')
 
+    docpii = subparsers.add_parser('pii_docpii', help='Convert external DocPII benchmark JSON')
+    docpii.add_argument(
+        '--in',
+        dest='in_path',
+        default='data/raw/external_benchmarks/pii/docpii-redaction-benchmark/docPII-contextual-redaction-benchmark.json',
+    )
+    docpii.add_argument('--out', dest='out_path', default='data/raw/pii/docpii-contextual-1k.jsonl')
+    docpii.add_argument('--source-name', default='docpii-contextual')
+    docpii.add_argument('--source-type', default='external_docpii_redaction')
+    docpii.add_argument('--limit', type=int, default=None)
+
+    synthetic = subparsers.add_parser('pii_synthetic', help='Convert external synthetic text anonymizer CSV')
+    synthetic.add_argument(
+        '--in',
+        dest='in_path',
+        default='data/raw/external_benchmarks/pii/synthetic-text-anonymizer-dataset-v1/data/data.csv',
+    )
+    synthetic.add_argument('--out', dest='out_path', default='data/raw/pii/synthetic-anonymizer-8k.jsonl')
+    synthetic.add_argument('--source-name', default='synthetic-anonymizer-v1')
+    synthetic.add_argument('--source-type', default='external_synthetic_pii_ner')
+    synthetic.add_argument('--limit', type=int, default=None)
+
     arxiv = subparsers.add_parser('arxiv', help='Convert local arXiv source archives')
     arxiv.add_argument('--in-dir', default='data/raw/arxiv/0001')
     arxiv.add_argument('--out', default='data/raw/arxiv/arxiv-0001.jsonl')
@@ -697,7 +829,31 @@ def main() -> None:
                 source_type=args.source_type,
             ),
         )
-    else:
+    elif args.kind == 'pii_docpii':
+        in_path = resolve_path(root, args.in_path)
+        out_path = resolve_path(root, args.out_path)
+        count = replace_jsonl(
+            out_path,
+            iter_docpii_records(
+                in_path,
+                source_name=args.source_name,
+                source_type=args.source_type,
+                limit=args.limit,
+            ),
+        )
+    elif args.kind == 'pii_synthetic':
+        in_path = resolve_path(root, args.in_path)
+        out_path = resolve_path(root, args.out_path)
+        count = replace_jsonl(
+            out_path,
+            iter_synthetic_text_anonymizer_records(
+                in_path,
+                source_name=args.source_name,
+                source_type=args.source_type,
+                limit=args.limit,
+            ),
+        )
+    elif args.kind == 'arxiv':
         in_dir = resolve_path(root, args.in_dir)
         out_path = resolve_path(root, args.out)
         count = replace_jsonl(
@@ -709,6 +865,8 @@ def main() -> None:
                 limit=args.limit,
             ),
         )
+    else:
+        raise ValueError(f'Unsupported conversion kind: {args.kind}')
 
     print(f'wrote {count} records -> {out_path}')
 

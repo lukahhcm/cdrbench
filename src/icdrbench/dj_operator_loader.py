@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import json
+import os
 import string
 import sys
 import types
@@ -14,9 +15,28 @@ from typing import Any, Dict
 import regex as re
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-ICDRBENCH_ROOT = REPO_ROOT
-DJ_SOURCE = ICDRBENCH_ROOT / 'data-juicer' / 'data_juicer'
-DJ_REF_ASSETS = ICDRBENCH_ROOT / 'data' / 'src' / 'refs'
+
+
+def _resolve_data_juicer_repo_root() -> Path:
+    env_candidates = [
+        os.environ.get('ICDRBENCH_DATA_JUICER_ROOT'),
+        os.environ.get('DATA_JUICER_ROOT'),
+    ]
+    candidates = [Path(value).expanduser() for value in env_candidates if value]
+    candidates.append(REPO_ROOT / 'data-juicer')
+    for candidate in candidates:
+        if (candidate / 'data_juicer').exists():
+            return candidate
+    joined = ', '.join(str(path) for path in candidates)
+    raise FileNotFoundError(
+        'Unable to locate a Data-Juicer checkout. Set ICDRBENCH_DATA_JUICER_ROOT '
+        f'or DATA_JUICER_ROOT to the Data-Juicer repo root. Tried: {joined}'
+    )
+
+
+DJ_REPO_ROOT = _resolve_data_juicer_repo_root()
+DJ_SOURCE = DJ_REPO_ROOT / 'data_juicer'
+DJ_REF_ASSETS = DJ_REPO_ROOT / 'data' / 'src' / 'refs'
 LOCAL_REF_ASSETS = REPO_ROOT / 'data' / 'src' / 'refs'
 
 

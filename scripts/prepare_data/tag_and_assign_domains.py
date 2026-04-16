@@ -40,6 +40,7 @@ def main() -> None:
     parser.add_argument('--assignments-path', default='outputs/domain_assignment_counts.csv')
     parser.add_argument('--catalog-path', default='outputs/domain_operator_catalog.csv')
     parser.add_argument('--min-active-mappers', type=int, default=2)
+    parser.add_argument('--max-text-length', type=int, default=None)
     parser.add_argument('--max-records', type=int, default=None)
     parser.add_argument('--progress-every', type=int, default=500)
     parser.add_argument('--resume', action='store_true', help='Resume from existing per-corpus tagged/filtered outputs.')
@@ -90,6 +91,7 @@ def main() -> None:
                 field_map=corpus_cfg.get('field_map'),
                 defaults=corpus_cfg.get('defaults'),
                 min_active_mappers=args.min_active_mappers,
+                max_text_length=args.max_text_length,
                 max_records=args.max_records,
                 progress_every=args.progress_every,
                 total_records_hint=total_records_hint,

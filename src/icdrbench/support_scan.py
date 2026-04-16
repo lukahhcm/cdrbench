@@ -16,10 +16,14 @@ from icdrbench.dj_operator_loader import (
 )
 
 
+SAFE_MAX_CHARS_FOR_EXPENSIVE_MAPPERS = 80_000
+EXPENSIVE_LONG_TEXT_MAPPERS = {
+    'remove_repeat_sentences_mapper',
+    'remove_words_with_incorrect_substrings_mapper',
+}
+
+
 # Regex-heavy table stripping can be prohibitively slow on very long documents.
-SAFE_MAX_CHARS_FOR_REMOVE_TABLE_TEXT = 120_000
-
-
 def load_jsonl(path: Path) -> List[Dict[str, Any]]:
     records = []
     with open(path, 'r', encoding='utf-8') as f:
@@ -112,14 +116,23 @@ def _build_sample(text: str, suffix: str) -> Dict[str, Any]:
 
 def run_mapper(op_name: str, text: str, params: Dict[str, Any], suffix: str = '') -> Dict[str, Any]:
     mode = get_operator_execution_mode(op_name)
-    if op_name == 'remove_table_text_mapper' and len(text) > SAFE_MAX_CHARS_FOR_REMOVE_TABLE_TEXT:
+    if op_name == 'remove_table_text_mapper':
         return {
             'kind': 'mapper',
             'execution_mode': mode,
             'active': False,
             'output_length': len(text),
             'delta_chars': 0,
-            'skipped': 'text_too_long_for_remove_table_text_mapper',
+            'skipped': 'temporarily_disabled_for_pipeline_runtime',
+        }
+    if op_name in EXPENSIVE_LONG_TEXT_MAPPERS and len(text) > SAFE_MAX_CHARS_FOR_EXPENSIVE_MAPPERS:
+        return {
+            'kind': 'mapper',
+            'execution_mode': mode,
+            'active': False,
+            'output_length': len(text),
+            'delta_chars': 0,
+            'skipped': 'text_too_long_for_expensive_mapper',
         }
     try:
         op = create_operator(op_name, **params)

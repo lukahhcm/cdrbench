@@ -65,7 +65,7 @@ def build_domain_execution_plan(domains_cfg: Dict[str, Any]) -> Dict[str, Any]:
         for scope, op_cfgs in (('shared', shared_ops), ('specific', specific_ops)):
             for op_cfg in op_cfgs:
                 op_name = op_cfg['name']
-                kind = op_cfg.get('kind', get_operator_kind(op_name))
+                kind = op_cfg.get('kind') or get_operator_kind(op_name)
                 params = dict(op_cfg.get('params', {}))
                 key = _execution_key(op_name, params)
                 if key not in execution_variants_by_key:
@@ -236,6 +236,7 @@ def label_record(
     field_map: Dict[str, str] | None = None,
     defaults: Dict[str, Any] | None = None,
     min_active_mappers: int = 2,
+    max_text_length: int | None = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any] | None]:
     normalized = normalize_record(
         record,
@@ -244,6 +245,27 @@ def label_record(
         field_map=field_map,
         defaults=defaults,
     )
+
+    if max_text_length is not None and len(normalized['text']) > max_text_length:
+        tag_payload = {
+            'id': normalized['id'],
+            'corpus': corpus_name,
+            'source_name': normalized['source_name'],
+            'original_domain': record.get('domain'),
+            'best_domain_candidate': None,
+            'assigned_domain': None,
+            'text_length': len(normalized['text']),
+            'active_mapper_count': 0,
+            'active_mapper_names': [],
+            'unique_active_mapper_count': 0,
+            'unique_active_mapper_names': [],
+            'keep': False,
+            'domain_candidates': [],
+            'operators': {},
+            'skipped_long_text': True,
+            'skip_reason': f'text_length>{max_text_length}',
+        }
+        return tag_payload, None
 
     operator_results: Dict[str, Dict[str, Any]] = {}
     for variant in plan['execution_variants']:
@@ -295,6 +317,7 @@ def label_record(
         'keep': assigned_domain is not None and len(active_mapper_names) >= min_active_mappers,
         'domain_candidates': domain_candidates,
         'operators': operator_results,
+        'skipped_long_text': False,
     }
 
     filtered_record = None
@@ -312,6 +335,7 @@ def process_corpus(
     field_map: Dict[str, str] | None = None,
     defaults: Dict[str, Any] | None = None,
     min_active_mappers: int = 2,
+    max_text_length: int | None = None,
     max_records: int | None = None,
     progress_every: int = 0,
     total_records_hint: int | None = None,
@@ -326,6 +350,7 @@ def process_corpus(
     assigned_records = 0
     kept_records = 0
     insufficient_mapper_records = 0
+    skipped_long_text_records = 0
     active_mapper_total = 0
     kept_assignments = Counter()
     best_candidate_assignments = Counter()
@@ -341,12 +366,14 @@ def process_corpus(
                 payload = json.loads(line)
                 active_count = int(payload.get('active_mapper_count', 0) or 0)
                 active_mapper_total += active_count
+                if payload.get('skipped_long_text'):
+                    skipped_long_text_records += 1
                 if payload.get('best_domain_candidate'):
                     best_candidate_records += 1
                     best_candidate_assignments[str(payload['best_domain_candidate'])] += 1
                 if payload.get('assigned_domain'):
                     assigned_records += 1
-                if active_count < min_active_mappers:
+                if not payload.get('skipped_long_text') and active_count < min_active_mappers:
                     insufficient_mapper_records += 1
                 if payload.get('keep') and payload.get('assigned_domain'):
                     kept_records += 1
@@ -411,6 +438,7 @@ def process_corpus(
                 field_map=field_map,
                 defaults=defaults,
                 min_active_mappers=min_active_mappers,
+                max_text_length=max_text_length,
             )
             tagged_out.write(json.dumps(tag_payload, ensure_ascii=False) + '\n')
 
@@ -421,7 +449,9 @@ def process_corpus(
                 best_candidate_assignments[tag_payload['best_domain_candidate']] += 1
             if tag_payload['assigned_domain'] is not None:
                 assigned_records += 1
-            if tag_payload['active_mapper_count'] < min_active_mappers:
+            if tag_payload.get('skipped_long_text'):
+                skipped_long_text_records += 1
+            elif tag_payload['active_mapper_count'] < min_active_mappers:
                 insufficient_mapper_records += 1
             if filtered_record is None:
                 _print_progress()
@@ -446,6 +476,7 @@ def process_corpus(
         'kept_records': kept_records,
         'dropped_records': total_records - kept_records,
         'insufficient_mapper_records': insufficient_mapper_records,
+        'skipped_long_text_records': skipped_long_text_records,
         'unassigned_records': total_records - assigned_records,
         'keep_rate': (kept_records / total_records) if total_records else 0.0,
         'mean_active_mapper_count': (active_mapper_total / total_records) if total_records else 0.0,
