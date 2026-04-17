@@ -371,7 +371,7 @@ def main() -> None:
     )
     parser.add_argument('--tagged-dir', default='data/processed/domain_tags')
     parser.add_argument('--domains-config', default='configs/domains.yaml')
-    parser.add_argument('--output-dir', default='outputs/workflow_mining')
+    parser.add_argument('--output-dir', default='data/processed/workflow_mining')
     parser.add_argument('--domain-field', choices=['assigned_domain', 'best_domain_candidate'], default='assigned_domain')
     parser.add_argument('--min-active-mappers', type=int, default=2)
     parser.add_argument('--min-support', type=int, default=5)

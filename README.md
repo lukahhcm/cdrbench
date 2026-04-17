@@ -9,7 +9,7 @@
 1. 下载 raw JSONL 到 `data/raw/`
 2. 用 `tag_and_assign_domains.py` 跑 Data-Juicer CLI 打标
 3. 用 `mine_domain_workflows.py` 从 `domain_tags` 里挖 workflow families 和 concrete workflow candidates
-4. 查看 `outputs/workflow_mining/<domain>/workflow_candidates.yaml`，人工挑每个 domain 的 workflow
+4. 查看 `data/processed/workflow_mining/<domain>/workflow_candidates.yaml`，人工挑每个 domain 的 workflow
 
 ## 1. 拉代码
 
@@ -125,17 +125,17 @@ HF_TOKEN=<your_hf_token_if_needed> \
 ```bash
 .venv-ops/bin/python scripts/prepare_data/mine_domain_workflows.py \
   --tagged-dir data/processed/domain_tags \
-  --output-dir outputs/workflow_mining
+  --output-dir data/processed/workflow_mining
 ```
 
 默认规则里，某个具体 workflow 至少要有 `5` 条样本支持，才会被保留为有效 workflow candidate。这个阈值可以用 `--min-workflow-support` 调整。
 
 输出文件：
 
-- `outputs/workflow_mining/<domain>/workflow_families.csv`
-- `outputs/workflow_mining/<domain>/selected_workflows.csv`
-- `outputs/workflow_mining/<domain>/workflow_candidates.yaml`
-- `outputs/workflow_mining/domain_workflow_mining_summary.csv`
+- `data/processed/workflow_mining/<domain>/workflow_families.csv`
+- `data/processed/workflow_mining/<domain>/selected_workflows.csv`
+- `data/processed/workflow_mining/<domain>/workflow_candidates.yaml`
+- `data/processed/workflow_mining/domain_workflow_mining_summary.csv`
 
 ## 6. 怎么看 workflow 结果
 
@@ -144,7 +144,7 @@ HF_TOKEN=<your_hf_token_if_needed> \
 1. 先看总览
 
 ```bash
-column -s, -t < outputs/workflow_mining/domain_workflow_mining_summary.csv | less -S
+column -s, -t < data/processed/workflow_mining/domain_workflow_mining_summary.csv | less -S
 ```
 
 这个文件告诉你每个 domain 挖出了多少 family、多少 candidate workflow。
@@ -152,7 +152,7 @@ column -s, -t < outputs/workflow_mining/domain_workflow_mining_summary.csv | les
 2. 再看某个 domain 的 family
 
 ```bash
-column -s, -t < outputs/workflow_mining/web/workflow_families.csv | less -S
+column -s, -t < data/processed/workflow_mining/web/workflow_families.csv | less -S
 ```
 
 这里看的是：
@@ -164,8 +164,8 @@ column -s, -t < outputs/workflow_mining/web/workflow_families.csv | less -S
 3. 最后看某个 domain 的具体 workflow 候选
 
 ```bash
-column -s, -t < outputs/workflow_mining/web/selected_workflows.csv | less -S
-sed -n '1,160p' outputs/workflow_mining/web/workflow_candidates.yaml
+column -s, -t < data/processed/workflow_mining/web/selected_workflows.csv | less -S
+sed -n '1,160p' data/processed/workflow_mining/web/workflow_candidates.yaml
 ```
 
 这里最重要的是：
@@ -190,8 +190,8 @@ sed -n '1,160p' outputs/workflow_mining/web/workflow_candidates.yaml
   - `data/processed/domain_filtered/*.jsonl`
   - `data/processed/domain_filtered/all.jsonl`
 - 每个 domain 的 workflow 候选：
-  - `outputs/workflow_mining/<domain>/workflow_candidates.yaml`
-  - `outputs/workflow_mining/<domain>/selected_workflows.csv`
+  - `data/processed/workflow_mining/<domain>/workflow_candidates.yaml`
+  - `data/processed/workflow_mining/<domain>/selected_workflows.csv`
 - 底层追踪信息：
   - `data/processed/domain_tags/*.jsonl`
   - `outputs/dj_cli_tagging/`
