@@ -147,7 +147,7 @@ def build_dj_invocation(
     default_bin: str,
     dj_python: str,
     dj_repo_root: Path | None,
-    module_name: str,
+    repo_script_relpath: str,
 ) -> tuple[list[str], dict[str, str] | None, str]:
     if explicit_bin != default_bin:
         resolved_bin = resolve_bin(explicit_bin)
@@ -159,7 +159,8 @@ def build_dj_invocation(
         repo_pythonpath = str(dj_repo_root)
         env['PYTHONPATH'] = f'{repo_pythonpath}{os.pathsep}{existing_pythonpath}' if existing_pythonpath else repo_pythonpath
         resolved_python = resolve_bin(dj_python)
-        return [resolved_python, '-m', module_name], env, f'repo:{dj_repo_root}'
+        repo_script = dj_repo_root / repo_script_relpath
+        return [resolved_python, str(repo_script)], env, f'repo:{repo_script}'
 
     return [resolve_bin(default_bin)], None, f'bin:{default_bin}'
 
@@ -310,14 +311,14 @@ def main() -> None:
         default_bin='dj-process',
         dj_python=args.dj_python,
         dj_repo_root=dj_repo_root,
-        module_name='data_juicer.tools.process_data',
+        repo_script_relpath='tools/process_data.py',
     )
     analyze_cmd_prefix, analyze_env, analyze_mode = build_dj_invocation(
         explicit_bin=args.dj_analyze_bin,
         default_bin='dj-analyze',
         dj_python=args.dj_python,
         dj_repo_root=dj_repo_root,
-        module_name='data_juicer.tools.analyze_data',
+        repo_script_relpath='tools/analyze_data.py',
     )
     config_dir = root / args.config_dir
     per_op_dir = root / args.per_op_dir

@@ -39,8 +39,8 @@ uv pip install --python .venv-ops/bin/python -U huggingface_hub py-data-juicer
 主打标脚本默认会优先走仓库里的：
 
 ```bash
-python -m data_juicer.tools.process_data
-python -m data_juicer.tools.analyze_data
+python data-juicer/tools/process_data.py
+python data-juicer/tools/analyze_data.py
 ```
 
 并自动把 `./data-juicer` 注入到 `PYTHONPATH`。只有在仓库里没有这份目录时，才会退回系统里的 `dj-process` / `dj-analyze`。
