@@ -164,9 +164,11 @@ def build_dj_invocation(
             'import runpy, sys; '
             'repo_root = sys.argv[1]; '
             'script_path = sys.argv[2]; '
+            'script_args = sys.argv[3:]; '
             'sys.path.insert(0, repo_root); '
             'stale = [name for name in sys.modules if name == "data_juicer" or name.startswith("data_juicer.")]; '
             '[sys.modules.pop(name, None) for name in stale]; '
+            'sys.argv = [script_path] + script_args; '
             'runpy.run_path(script_path, run_name="__main__")'
         )
         return [resolved_python, '-c', bootstrap, str(dj_repo_root), str(repo_script)], env, f'repo:{repo_script}'
