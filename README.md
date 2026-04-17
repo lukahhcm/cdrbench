@@ -209,3 +209,29 @@ sed -n '1,160p' data/processed/workflow_mining/web/workflow_candidates.yaml
 ```bash
 .venv-ops/bin/python scripts/prepare_data/run_dj_per_op_probe.py --execute --resume
 ```
+
+## DJ 排错
+
+如果服务器上跑打标时出现这类错误：
+
+- `No module named 'data_juicer.core.data'`
+- 同样的 `python` 命令之前能跑、现在不能跑
+
+先不要手动猜环境。直接在仓库根目录运行：
+
+```bash
+python scripts/debug/debug_data_juicer_env.py
+```
+
+这个脚本会检查：
+
+- 当前 `python` 可执行文件和版本
+- 是否先加载到了系统安装的 `data_juicer`
+- 仓库内 vendored 的 `data-juicer/` 能不能正常 import
+- `data-juicer/tools/process_data.py` 和 `analyze_data.py` 在 import 阶段会不会报错
+
+把完整输出贴回来，就能更快定位是：
+
+- 还在误用系统里的旧 DJ
+- vendored DJ 没被正确加载
+- 还是当前 Python 环境和 vendored DJ 本身不兼容
