@@ -1,6 +1,15 @@
 # ICDR-Bench
 
-这份仓库用于下载 ICDR-Bench 的已整理 JSONL 数据，并用 Data-Juicer CLI 做打标与 workflow 挖掘。
+这份仓库用于下载 ICDR-Bench 的已整理 JSONL 数据，并用 Data-Juicer CLI 做打标、domain 数据池构建和 workflow 挖掘。
+
+## 一条主线
+
+如果你只想知道“接下来该做什么”，就按这四步：
+
+1. 下载 raw JSONL 到 `data/raw/`
+2. 用 `tag_and_assign_domains.py` 跑 Data-Juicer CLI 打标
+3. 用 `mine_domain_workflows.py` 从 `domain_tags` 里挖 workflow families 和 concrete workflow candidates
+4. 查看 `outputs/workflow_mining/<domain>/workflow_candidates.yaml`，人工挑每个 domain 的 workflow
 
 ## 1. 拉代码
 
@@ -91,6 +100,13 @@ HF_TOKEN=<your_hf_token_if_needed> \
 - `outputs/dj_cli_tagging/`
   - Data-Juicer YAML、per-op CLI 输出、logs
 
+这一步跑完以后，你已经有了两类中间结果：
+
+- `domain_tags/*.jsonl`
+  每条样本的 per-op tagging 结果，后面 workflow 挖掘吃这个
+- `domain_filtered/*.jsonl`
+  已经按 `assigned_domain` 留下来的样本，后面可作为每个 domain 的候选数据池
+
 ## 5. 挖掘每个 domain 的 workflow
 
 ```bash
@@ -104,6 +120,66 @@ HF_TOKEN=<your_hf_token_if_needed> \
 - `outputs/workflow_mining/<domain>/workflow_families.csv`
 - `outputs/workflow_mining/<domain>/selected_workflows.csv`
 - `outputs/workflow_mining/<domain>/workflow_candidates.yaml`
+- `outputs/workflow_mining/domain_workflow_mining_summary.csv`
+
+## 6. 怎么看 workflow 结果
+
+建议按这个顺序看：
+
+1. 先看总览
+
+```bash
+column -s, -t < outputs/workflow_mining/domain_workflow_mining_summary.csv | less -S
+```
+
+这个文件告诉你每个 domain 挖出了多少 family、多少 candidate workflow。
+
+2. 再看某个 domain 的 family
+
+```bash
+column -s, -t < outputs/workflow_mining/web/workflow_families.csv | less -S
+```
+
+这里看的是：
+
+- 这个 domain 有几个 workflow family
+- 每个 family 的 anchor operator set 是什么
+- family support 大概有多高
+
+3. 最后看某个 domain 的具体 workflow 候选
+
+```bash
+column -s, -t < outputs/workflow_mining/web/selected_workflows.csv | less -S
+sed -n '1,160p' outputs/workflow_mining/web/workflow_candidates.yaml
+```
+
+这里最重要的是：
+
+- `selected_workflows.csv`
+  方便快速扫 operator 组合、长度、support
+- `workflow_candidates.yaml`
+  更适合人工整理成最终 workflow library
+
+注意：这里看到的还是 `operator-set based workflow candidates`，不是最终已经定好顺序的 benchmark workflow。下一步通常是：
+
+1. 从每个 domain 的 `workflow_candidates.yaml` 里挑 family 和 concrete workflow candidates
+2. 补 operator 顺序
+3. 补 activation spec
+4. 再做 workflow-level executor validation
+
+## 7. 最终你会拿到什么
+
+如果整条流程跑完，当前 repo 里最重要的产物是：
+
+- 每个 domain 的候选数据：
+  - `data/processed/domain_filtered/*.jsonl`
+  - `data/processed/domain_filtered/all.jsonl`
+- 每个 domain 的 workflow 候选：
+  - `outputs/workflow_mining/<domain>/workflow_candidates.yaml`
+  - `outputs/workflow_mining/<domain>/selected_workflows.csv`
+- 底层追踪信息：
+  - `data/processed/domain_tags/*.jsonl`
+  - `outputs/dj_cli_tagging/`
 
 ## 常用补充
 
