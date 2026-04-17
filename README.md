@@ -107,10 +107,10 @@ HF_TOKEN=<your_hf_token_if_needed> \
 - `data/processed/domain_tags/*.jsonl`
 - `data/processed/domain_filtered/*.jsonl`
 - `data/processed/domain_filtered/all.jsonl`
-- `outputs/domain_operator_catalog.csv`
-- `outputs/domain_labeling_summary.csv`
-- `outputs/domain_assignment_counts.csv`
-- `outputs/dj_cli_tagging/`
+- `data/processed/domain_operator_catalog.csv`
+- `data/processed/domain_labeling_summary.csv`
+- `data/processed/domain_assignment_counts.csv`
+- `data/processed/dj_cli_tagging/`
   - Data-Juicer YAML、per-op CLI 输出、logs
 
 这一步跑完以后，你已经有了两类中间结果：
@@ -194,7 +194,7 @@ sed -n '1,160p' data/processed/workflow_mining/web/workflow_candidates.yaml
   - `data/processed/workflow_mining/<domain>/selected_workflows.csv`
 - 底层追踪信息：
   - `data/processed/domain_tags/*.jsonl`
-  - `outputs/dj_cli_tagging/`
+  - `data/processed/dj_cli_tagging/`
 
 ## 常用补充
 

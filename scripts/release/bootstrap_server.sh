@@ -110,11 +110,11 @@ if [[ "$RUN_PROBE" == "true" ]]; then
     --np 2 \
     --mapper-max-records 1000 \
     --filter-max-records 5000 \
-    --summary-csv outputs/dj_per_op_probe/summary_full.csv
+    --summary-csv data/processed/dj_per_op_probe/summary_full.csv
 fi
 
 echo "Server bootstrap complete."
 echo "Project dir: $PROJECT_DIR"
 echo "Now you can run, for example:"
 echo "  PYTHONPATH=src .venv-ops/bin/python scripts/prepare_data/tag_and_assign_domains.py --resume"
-echo "  PYTHONPATH=src .venv-ops/bin/python scripts/prepare_data/run_dj_per_op_probe.py --execute --resume --summary-csv outputs/dj_per_op_probe/summary_full.csv"
+echo "  PYTHONPATH=src .venv-ops/bin/python scripts/prepare_data/run_dj_per_op_probe.py --execute --resume --summary-csv data/processed/dj_per_op_probe/summary_full.csv"
