@@ -70,6 +70,16 @@ ICDR-Bench v1 主榜统一采用：
 
 因此，像 `ExtractTablesFromHtmlMapper`、`LatexFigureContextExtractorMapper` 这类更自然输出结构化 artifact 的算子，适合作为 appendix / extension，而不是 v1 主榜协议。
 
+对于 `LatexFigureContextExtractorMapper`，原始 DJ 实现是 row-expanding 的：
+- 一篇论文可能展开成多条 figure rows
+- 也可能没有任何 figure row 被产出
+
+在 ICDR-Bench 当前主榜配置里，我们不直接使用它的 fan-out 形式，而是使用一对一 `text` 模式：
+- 若没有 figure，则保持原文不变
+- 若存在 1..N 个 figure / subfigure，则把它们合并为规范化文本块写回 `text`
+
+这样它就重新落回主榜的单条 `input -> status + clean_text` 协议里。
+
 ---
 
 ## 1. domain 应该按应用场景来分

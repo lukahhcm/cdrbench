@@ -118,6 +118,8 @@ class LatexFigureContextExtractorMapper(Mapper):
         context_key: str = "citing_paragraphs",
         parent_caption_key: str = "parent_caption",
         parent_label_key: str = "parent_label",
+        output_mode: str = "rows",
+        text_output_format: str = "figure_context_blocks_v1",
         *args,
         **kwargs,
     ):
@@ -171,6 +173,8 @@ class LatexFigureContextExtractorMapper(Mapper):
         self.context_key = context_key
         self.parent_caption_key = parent_caption_key
         self.parent_label_key = parent_label_key
+        self.output_mode = output_mode
+        self.text_output_format = text_output_format
 
         self._compile_patterns()
 
@@ -497,9 +501,83 @@ class LatexFigureContextExtractorMapper(Mapper):
         output_samples[self.parent_caption_key].append(parent.caption if parent else "")
         output_samples[self.parent_label_key].append(parent.label if parent else "")
 
+    def _build_figure_records(self, figures, paragraphs):
+        records = []
+        for fig in figures:
+            if fig.sub_figures:
+                parent_citing = self._find_citing_paragraphs(fig.label, paragraphs)
+                for sf in fig.sub_figures:
+                    sf_citing = self._find_citing_paragraphs(sf.label, paragraphs)
+                    merged = list(dict.fromkeys(parent_citing + sf_citing))
+                    records.append(
+                        {
+                            'caption': sf.caption,
+                            'label': sf.label,
+                            'images': sf.image_paths,
+                            'citing_paragraphs': merged,
+                            'parent_caption': fig.caption,
+                            'parent_label': fig.label,
+                        }
+                    )
+            else:
+                citing = self._find_citing_paragraphs(fig.label, paragraphs)
+                records.append(
+                    {
+                        'caption': fig.caption,
+                        'label': fig.label,
+                        'images': fig.image_paths,
+                        'citing_paragraphs': citing,
+                        'parent_caption': '',
+                        'parent_label': '',
+                    }
+                )
+        return records
+
+    def _serialize_figure_records_to_text(self, records):
+        if self.text_output_format != "figure_context_blocks_v1":
+            raise ValueError(f"Unsupported text_output_format: {self.text_output_format}")
+
+        blocks = []
+        for idx, record in enumerate(records, start=1):
+            lines = [f"Figure {idx}"]
+            lines.append(f"Label: {record['label']}")
+            lines.append(f"Caption: {record['caption']}")
+            if record['parent_label'] or record['parent_caption']:
+                lines.append(f"Parent Label: {record['parent_label']}")
+                lines.append(f"Parent Caption: {record['parent_caption']}")
+            lines.append("Images:")
+            if record['images']:
+                lines.extend(f"- {image_path}" for image_path in record['images'])
+            else:
+                lines.append("-")
+            lines.append("Citing Paragraphs:")
+            if record['citing_paragraphs']:
+                lines.extend(f"- {paragraph}" for paragraph in record['citing_paragraphs'])
+            else:
+                lines.append("-")
+            blocks.append("\n".join(lines))
+        return "\n\n".join(blocks)
+
     def process_batched(self, samples):
         input_keys = samples.keys()
         num_samples = len(samples[next(iter(input_keys))])
+
+        if self.output_mode == "text":
+            output_samples: Dict[str, list] = {key: [] for key in input_keys}
+            for i in range(num_samples):
+                latex_source = samples[self.text_key][i]
+                figures = self._parse_figures(latex_source)
+                paragraphs = self._prepare_paragraphs(latex_source) if figures else []
+                figure_records = self._build_figure_records(figures, paragraphs) if figures else []
+
+                for key in input_keys:
+                    output_samples[key].append(samples[key][i])
+
+                if figure_records:
+                    output_samples[self.text_key][-1] = self._serialize_figure_records_to_text(figure_records)
+
+            return output_samples
+
         output_keys = input_keys | {
             self.caption_key,
             self.label_key,
@@ -528,37 +606,29 @@ class LatexFigureContextExtractorMapper(Mapper):
             paragraphs = self._prepare_paragraphs(latex_source)
 
             # Fan out
-            for fig in figures:
-                if fig.sub_figures:
-                    # Parent-level citing paragraphs
-                    parent_citing = self._find_citing_paragraphs(fig.label, paragraphs)
-
-                    for sf in fig.sub_figures:
-                        # Subfigure-specific citing paragraphs
-                        sf_citing = self._find_citing_paragraphs(sf.label, paragraphs)
-                        # Merge parent + subfigure, deduplicated,
-                        # preserving order
-                        merged = list(dict.fromkeys(parent_citing + sf_citing))
-
-                        self._append_output_row(
-                            output_samples,
-                            samples,
-                            i,
-                            input_keys,
-                            fig=sf,
-                            citing_paragraphs=merged,
-                            parent=fig,
-                        )
-                else:
-                    # Single figure (leaf) — no parent
-                    citing = self._find_citing_paragraphs(fig.label, paragraphs)
-                    self._append_output_row(
-                        output_samples,
-                        samples,
-                        i,
-                        input_keys,
-                        fig=fig,
-                        citing_paragraphs=citing,
+            for record in self._build_figure_records(figures, paragraphs):
+                parent = None
+                if record['parent_label'] or record['parent_caption']:
+                    parent = Figure(
+                        caption=record['parent_caption'],
+                        label=record['parent_label'],
+                        image_paths=[],
+                        sub_figures=[],
                     )
+                leaf = Figure(
+                    caption=record['caption'],
+                    label=record['label'],
+                    image_paths=record['images'],
+                    sub_figures=[],
+                )
+                self._append_output_row(
+                    output_samples,
+                    samples,
+                    i,
+                    input_keys,
+                    fig=leaf,
+                    citing_paragraphs=record['citing_paragraphs'],
+                    parent=parent,
+                )
 
         return output_samples

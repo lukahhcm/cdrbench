@@ -29,6 +29,29 @@ serialization_specs:
       - Use one blank line between tables.
       - Preserve table headers when present.
       - Do not add titles, bullets, commentary, or explanations.
+  figure_context_blocks_v1:
+    description: Serialize extracted LaTeX figure contexts as canonical text blocks.
+    output_type: text
+    block_separator: "\n\n"
+    fields_in_order:
+      - figure_index
+      - label
+      - caption
+      - parent_label
+      - parent_caption
+      - images
+      - citing_paragraphs
+    no_figure_behavior: leave_text_unchanged
+    model_output_contract:
+      - Output plain text only.
+      - Do not wrap the answer in Markdown code fences.
+      - Keep figure blocks in source order.
+      - Start each block with `Figure {index}`.
+      - Emit `Label:` and `Caption:` lines for every block.
+      - Emit `Parent Label:` and `Parent Caption:` only when they are non-empty.
+      - Emit `Images:` followed by `- path` lines.
+      - Emit `Citing Paragraphs:` followed by `- paragraph` lines.
+      - Do not add commentary or explanations.
 
 operators:
   extract_tables_from_html_mapper:
@@ -48,6 +71,24 @@ operators:
       meta_tagging_variant:
         params:
           output_mode: meta
+  latex_figure_context_extractor_mapper:
+    benchmark_output_type: text
+    serialization_spec: figure_context_blocks_v1
+    natural_language_intent: Extract figure and subfigure context from LaTeX and serialize it into canonical text blocks.
+    prompt_template: >
+      Extract every figure or subfigure from the LaTeX source and output a
+      canonical text summary. For each extracted figure block, include its
+      label, caption, parent label and parent caption when available, image
+      paths, and the prose paragraphs that cite it. Output plain text only and
+      keep the figure blocks in document order.
+    config_variants:
+      default_benchmark_variant:
+        params:
+          output_mode: text
+          text_output_format: figure_context_blocks_v1
+      row_expansion_variant:
+        params:
+          output_mode: rows
 
 future_extension_notes:
   - Add natural-language templates for other mappers and filters as workflows stabilize.

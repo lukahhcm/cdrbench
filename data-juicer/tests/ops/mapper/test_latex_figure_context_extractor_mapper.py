@@ -21,6 +21,15 @@ class LatexFigureContextExtractorMapperTest(DataJuicerTestCaseBase):
         )
         return dataset.to_list()
 
+    def _run_text_mode_mapper(self, samples):
+        op = LatexFigureContextExtractorMapper(
+            output_mode='text',
+            text_output_format='figure_context_blocks_v1',
+        )
+        dataset = Dataset.from_list(samples)
+        dataset = dataset.map(op.process, batch_size=len(samples))
+        return dataset.to_list()
+
     # ------------------------------------------------------------------
     # 1. Single figure with caption, label, and \includegraphics
     # ------------------------------------------------------------------
@@ -257,6 +266,49 @@ class LatexFigureContextExtractorMapperTest(DataJuicerTestCaseBase):
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0]['caption'], 'Wrapped')
         self.assertEqual(results[0]['label'], 'fig:wrap')
+
+    def test_text_mode_merges_subfigures_into_single_record(self):
+        latex = (
+            '\\begin{document}\n'
+            'See \\cref{fig:main} for details.\n\n'
+            'Also \\ref{fig:sub_b} is interesting.\n\n'
+            '\\begin{figure}\n'
+            '\\centering\n'
+            '\\begin{subfigure}\n'
+            '\\includegraphics{img/a.png}\n'
+            '\\caption{Sub A}\n'
+            '\\label{fig:sub_a}\n'
+            '\\end{subfigure}\n'
+            '\\begin{subfigure}\n'
+            '\\includegraphics{img/b.png}\n'
+            '\\caption{Sub B}\n'
+            '\\label{fig:sub_b}\n'
+            '\\end{subfigure}\n'
+            '\\caption{Main caption}\n'
+            '\\label{fig:main}\n'
+            '\\end{figure}\n'
+            '\\end{document}\n'
+        )
+        results = self._run_text_mode_mapper([{'text': latex}])
+        self.assertEqual(len(results), 1)
+        text = results[0]['text']
+        self.assertIn('Figure 1', text)
+        self.assertIn('Label: fig:sub_a', text)
+        self.assertIn('Parent Label: fig:main', text)
+        self.assertIn('Images:\n- img/a.png', text)
+        self.assertIn('Figure 2', text)
+        self.assertIn('Label: fig:sub_b', text)
+        self.assertIn('- Also \\ref{fig:sub_b} is interesting.', text)
+
+    def test_text_mode_keeps_original_text_when_no_figures(self):
+        latex = (
+            '\\begin{document}\n'
+            'Just some text, no figures.\n'
+            '\\end{document}\n'
+        )
+        results = self._run_text_mode_mapper([{'text': latex}])
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]['text'], latex)
 
     # ------------------------------------------------------------------
     # 10. Nested caption braces (e.g. \textbf{...} inside caption)

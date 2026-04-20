@@ -124,6 +124,7 @@ HF_TOKEN=<your_hf_token_if_needed> \
 - 大多数 text-cleaning mapper 会走 `dj-process`
 - 如果某个 mapper 在 benchmark 里最终要按 `text` 对齐，就优先配置成文本输出模式
 - 例如 `extract_tables_from_html_mapper` 在当前 ICDR-Bench 配置里会把表格抽成 TSV 文本写回 `text`，而不是只写嵌套 `meta.html_tables`
+- `latex_figure_context_extractor_mapper` 在当前 ICDR-Bench 配置里也走一对一 `text` 模式：会把一篇论文里的 figure / subfigure 信息合并成规范化文本块写回 `text`
 - 只有明确走 meta tagging 的 mapper，才会走 `dj-analyze`
 
 ## 5. 挖掘每个 domain 的 workflow
