@@ -24,6 +24,8 @@ class ExtractTablesFromHtmlMapper(Mapper):
         tables_field_name: str = MetaKeys.html_tables,
         retain_html_tags: bool = False,
         include_header: bool = True,
+        output_mode: str = "meta",
+        text_output_format: str = "tsv",
         *args,
         **kwargs,
     ):
@@ -43,10 +45,22 @@ class ExtractTablesFromHtmlMapper(Mapper):
         self.tables_field_name = tables_field_name
         self.retain_html_tags = retain_html_tags
         self.include_header = include_header
+        self.output_mode = output_mode
+        self.text_output_format = text_output_format
+
+    def _serialize_tables_to_text(self, extracted_tables):
+        if self.text_output_format != "tsv":
+            raise ValueError(f"Unsupported text_output_format: {self.text_output_format}")
+        table_blocks = []
+        for table in extracted_tables:
+            rows = ["\t".join(cell for cell in row) for row in table]
+            if rows:
+                table_blocks.append("\n".join(rows))
+        return "\n\n".join(table_blocks)
 
     def process_single(self, sample):
-        # check if it's generated already
-        if self.tables_field_name in sample[Fields.meta]:
+        # check if it's generated already in meta mode
+        if self.output_mode in {"meta", "both"} and self.tables_field_name in sample[Fields.meta]:
             return sample
 
         # parse the HTML content using BeautifulSoup
@@ -55,12 +69,17 @@ class ExtractTablesFromHtmlMapper(Mapper):
 
         # if no tables are found, return an empty list
         if not tables:
-            sample[Fields.meta][self.tables_field_name] = []
+            if self.output_mode in {"meta", "both"}:
+                sample[Fields.meta][self.tables_field_name] = []
             return sample
 
         # if retaining HTML tags, store the raw table elements
         if self.retain_html_tags:
-            sample[Fields.meta][self.tables_field_name] = [str(table) for table in tables]
+            extracted_tables = [str(table) for table in tables]
+            if self.output_mode in {"meta", "both"}:
+                sample[Fields.meta][self.tables_field_name] = extracted_tables
+            if self.output_mode in {"text", "both"}:
+                sample[self.text_key] = "\n\n".join(extracted_tables)
             return sample
 
         # extract table data without HTML tags
@@ -82,5 +101,8 @@ class ExtractTablesFromHtmlMapper(Mapper):
             if extracted_rows:
                 extracted_tables.append(extracted_rows)
 
-        sample[Fields.meta][self.tables_field_name] = extracted_tables
+        if self.output_mode in {"meta", "both"}:
+            sample[Fields.meta][self.tables_field_name] = extracted_tables
+        if self.output_mode in {"text", "both"}:
+            sample[self.text_key] = self._serialize_tables_to_text(extracted_tables)
         return sample

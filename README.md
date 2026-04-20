@@ -120,6 +120,12 @@ HF_TOKEN=<your_hf_token_if_needed> \
 - `domain_filtered/*.jsonl`
   已经按 `assigned_domain` 留下来的样本，后面可作为每个 domain 的候选数据池
 
+补充说明：
+- 大多数 text-cleaning mapper 会走 `dj-process`
+- 如果某个 mapper 在 benchmark 里最终要按 `text` 对齐，就优先配置成文本输出模式
+- 例如 `extract_tables_from_html_mapper` 在当前 ICDR-Bench 配置里会把表格抽成 TSV 文本写回 `text`，而不是只写嵌套 `meta.html_tables`
+- 只有明确走 meta tagging 的 mapper，才会走 `dj-analyze`
+
 ## 5. 挖掘每个 domain 的 workflow
 
 ```bash

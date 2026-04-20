@@ -30,6 +30,9 @@ domains:
         kind: mapper
       - name: extract_tables_from_html_mapper
         kind: mapper
+        params:
+          output_mode: text
+          text_output_format: tsv
       - name: fix_unicode_mapper
         kind: mapper
       - name: punctuation_normalization_mapper

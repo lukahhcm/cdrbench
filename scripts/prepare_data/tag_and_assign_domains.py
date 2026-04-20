@@ -39,11 +39,25 @@ FILTER_STATUS_RULES: dict[str, dict[str, Any]] = {
     'words_num_filter': {'value_key': 'num_words', 'min_key': 'min_num', 'max_key': 'max_num'},
 }
 
+TAGGING_MAPPER_RULES: dict[str, dict[str, Any]] = {
+    'extract_tables_from_html_mapper': {
+        'meta_key': 'html_tables',
+        'is_active': lambda value: isinstance(value, list) and len(value) > 0,
+    },
+}
+
 
 def is_supported_tagging_variant(variant: dict[str, Any]) -> bool:
     if variant['kind'] == 'mapper':
         return True
     return variant['name'] in FILTER_STATUS_RULES
+
+
+def is_tagging_mapper_variant(variant: dict[str, Any]) -> bool:
+    if variant['kind'] != 'mapper' or variant['name'] not in TAGGING_MAPPER_RULES:
+        return False
+    output_mode = variant.get('params', {}).get('output_mode', 'meta')
+    return output_mode == 'meta'
 
 
 def iter_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -253,6 +267,31 @@ def aggregate_mapper_results(
     return results
 
 
+def aggregate_tagging_mapper_results(
+    stats_rows: list[dict[str, Any]],
+    *,
+    op_name: str,
+) -> list[dict[str, Any]]:
+    rule = TAGGING_MAPPER_RULES[op_name]
+    meta_key = rule['meta_key']
+    is_active = rule['is_active']
+    results: list[dict[str, Any]] = []
+    for row in stats_rows:
+        meta = row.get('__dj__meta__', {}) or {}
+        meta_value = meta.get(meta_key)
+        results.append(
+            {
+                'kind': 'mapper',
+                'execution_mode': 'analyze_meta',
+                'active': bool(is_active(meta_value)),
+                'meta': meta,
+                'meta_key': meta_key,
+                'meta_value': meta_value,
+            }
+        )
+    return results
+
+
 def aggregate_filter_results(
     stats_rows: list[dict[str, Any]],
     *,
@@ -382,6 +421,7 @@ def main() -> None:
             op_name = variant['name']
             op_kind = variant['kind']
             params = dict(variant.get('params', {}))
+            use_analyze_for_mapper = is_tagging_mapper_variant(variant)
 
             corpus_config_dir = config_dir / corpus_name
             corpus_output_dir = per_op_dir / corpus_name
@@ -391,7 +431,7 @@ def main() -> None:
             export_path = corpus_output_dir / f'{op_key}.jsonl'
             cfg_path = corpus_config_dir / f'{op_key}.yaml'
             expected_path = export_path
-            if op_kind == 'mapper':
+            if op_kind == 'mapper' and not use_analyze_for_mapper:
                 payload = build_process_cfg(
                     dataset_path=input_path,
                     export_path=export_path,
@@ -415,7 +455,8 @@ def main() -> None:
                 cmd = [*analyze_cmd_prefix, '--config', str(cfg_path)]
                 cmd_env = analyze_env
                 expected_path = stats_path_for_export(export_path)
-                log_path = log_dir / corpus_name / f'{op_key}__analyze.log'
+                suffix = 'analyze_meta' if use_analyze_for_mapper else 'analyze'
+                log_path = log_dir / corpus_name / f'{op_key}__{suffix}.log'
 
             with cfg_path.open('w', encoding='utf-8') as f:
                 yaml.safe_dump(payload, f, sort_keys=False, allow_unicode=True)
@@ -431,9 +472,16 @@ def main() -> None:
             if not expected_path.exists():
                 raise SystemExit(f'missing expected CLI output for {corpus_name}/{op_key}: {expected_path}')
 
-            if op_kind == 'mapper':
+            if op_kind == 'mapper' and not use_analyze_for_mapper:
                 output_rows = iter_jsonl(export_path)
                 per_op_results[op_key] = aggregate_mapper_results(corpus_records, output_rows, text_field=text_field)
+            elif op_kind == 'mapper':
+                stats_rows = iter_jsonl(expected_path)
+                if len(stats_rows) != len(corpus_records):
+                    raise ValueError(
+                        f'tagging mapper stats row count mismatch for {corpus_name}/{op_key}: input={len(corpus_records)} stats={len(stats_rows)}'
+                    )
+                per_op_results[op_key] = aggregate_tagging_mapper_results(stats_rows, op_name=op_name)
             else:
                 stats_rows = iter_jsonl(expected_path)
                 if len(stats_rows) != len(corpus_records):
