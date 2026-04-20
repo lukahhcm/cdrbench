@@ -76,8 +76,6 @@ domains:
         kind: mapper
       - name: remove_repeat_sentences_mapper
         kind: mapper
-      - name: sentence_split_mapper
-        kind: mapper
 
   pii:
     description: PII Sanitization

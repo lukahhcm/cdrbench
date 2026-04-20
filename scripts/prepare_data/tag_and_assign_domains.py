@@ -46,11 +46,27 @@ TAGGING_MAPPER_RULES: dict[str, dict[str, Any]] = {
     },
 }
 
+ROW_EXPANDING_MAPPERS = {
+    'sentence_split_mapper',
+    'text_chunk_mapper',
+}
+
 
 def is_supported_tagging_variant(variant: dict[str, Any]) -> bool:
     if variant['kind'] == 'mapper':
         return True
     return variant['name'] in FILTER_STATUS_RULES
+
+
+def validate_variant_for_tagging(variant: dict[str, Any]) -> None:
+    if variant['kind'] != 'mapper':
+        return
+    if variant['name'] in ROW_EXPANDING_MAPPERS:
+        raise SystemExit(
+            f"unsupported row-expanding mapper in tagging pipeline: {variant['name']}. "
+            'Current ICDR-Bench tagging assumes one input row maps to one output row. '
+            'Remove this mapper from configs/domains.yaml or convert it to a one-to-one text mode first.'
+        )
 
 
 def is_tagging_mapper_variant(variant: dict[str, Any]) -> bool:
@@ -382,6 +398,8 @@ def main() -> None:
         print(f'using Data-Juicer analyze entry -> {analyze_mode}')
 
     plan = build_domain_execution_plan(domains_cfg)
+    for variant in plan['execution_variants']:
+        validate_variant_for_tagging(variant)
     supported_variants = [variant for variant in plan['execution_variants'] if is_supported_tagging_variant(variant)]
     skipped_variants = [variant for variant in plan['execution_variants'] if not is_supported_tagging_variant(variant)]
     if skipped_variants:
