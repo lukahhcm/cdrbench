@@ -9,7 +9,8 @@
 1. 下载 raw JSONL 到 `data/raw/`
 2. 用 `tag_and_assign_domains.py` 跑 Data-Juicer CLI 打标
 3. 用 `mine_domain_workflows.py` 从 `domain_tags` 里挖 workflow families 和 concrete workflow candidates
-4. 查看 `data/processed/workflow_mining/<domain>/workflow_candidates.yaml`，人工挑每个 domain 的 workflow
+4. 用 `materialize_domain_workflows.py` 把 mapper skeleton 落成一版带 filter 插入建议的 workflow library
+5. 查看 `data/processed/workflow_library/<domain>/workflow_library.yaml`，再做最终人工筛选
 
 ## 1. 拉代码
 
@@ -188,6 +189,44 @@ sed -n '1,160p' data/processed/workflow_mining/web/workflow_candidates.yaml
 2. 补 operator 顺序
 3. 补 activation spec
 4. 再做 workflow-level executor validation
+
+## 7. 直接产出一版 workflow library
+
+如果你不想停在 mapper operator set，而是想直接拿到“一版可用 workflow 草案”，继续跑：
+
+```bash
+.venv-ops/bin/python scripts/prepare_data/materialize_domain_workflows.py \
+  --workflow-mining-dir data/processed/workflow_mining \
+  --filtered-path data/processed/domain_filtered/all.jsonl \
+  --output-dir data/processed/workflow_library
+```
+
+这一步会做三件事：
+
+1. 按 domain 配置里的 operator 顺序，把 mapper set 排成一条确定的 mapper sequence
+2. 在支持这些 mapper 的真实样本上重放 mapper prefixes
+3. 对每个 checkpoint 评估 filter，给出推荐的 filter 插入位置和一版 materialized workflow variants
+
+输出文件：
+
+- `data/processed/workflow_library/<domain>/workflow_library.yaml`
+- `data/processed/workflow_library/<domain>/workflow_variants.csv`
+- `data/processed/workflow_library/<domain>/filter_attachments.csv`
+- `data/processed/workflow_library/workflow_library_summary.csv`
+
+其中最重要的是：
+
+- `workflow_library.yaml`
+  里面会同时给出：
+  - `ordered_mapper_sequence`
+  - `recommended_filter_attachments`
+  - `workflow_variants`
+  - `recommended_workflow_variant_id`
+
+你可以把这一步理解成：
+
+- `workflow_mining` 产出 mapper skeleton
+- `workflow_library` 产出第一版完整 workflow 草案
 
 如果你后面要把 workflow 自动转成自然语言指令，可以直接参考：
 

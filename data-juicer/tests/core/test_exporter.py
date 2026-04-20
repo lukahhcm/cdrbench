@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from datetime import datetime
 import jsonlines as jl
 from datasets import Dataset
 from cryptography.fernet import Fernet
@@ -176,6 +177,17 @@ class ExporterTest(DataJuicerTestCaseBase):
 
         self.assertTrue(os.path.exists(export_path))
         self.assertFalse(os.path.exists(add_suffix_to_filename(export_path, '_stats')))
+
+    def test_row_to_json_serializable_handles_datetime(self):
+        row = {
+            'text': 'hello',
+            Fields.meta: {
+                'created_at': datetime(2026, 4, 20, 12, 30, 45),
+            },
+        }
+
+        serialized = Exporter._row_to_json_serializable(row)
+        self.assertEqual(serialized[Fields.meta]['created_at'], '2026-04-20T12:30:45')
 
 
 class ExporterEncryptTest(DataJuicerTestCaseBase):

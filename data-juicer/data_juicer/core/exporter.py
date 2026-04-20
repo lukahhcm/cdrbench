@@ -1,6 +1,7 @@
 import json
 import os
 from multiprocessing import Pool
+from datetime import date, datetime, time
 
 from datasets import Dataset as HFDataset
 from loguru import logger
@@ -356,6 +357,8 @@ class Exporter:
             return {k: Exporter._row_to_json_serializable(v) for k, v in obj.items()}
         if isinstance(obj, list):
             return [Exporter._row_to_json_serializable(v) for v in obj]
+        if isinstance(obj, (datetime, date, time)):
+            return obj.isoformat()
         if hasattr(obj, "item"):  # numpy scalar
             return obj.item()
         if hasattr(obj, "tolist"):
