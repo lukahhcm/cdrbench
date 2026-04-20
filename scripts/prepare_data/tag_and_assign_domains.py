@@ -125,7 +125,9 @@ def load_cli_rows_with_recovery(
 
     exit_code = run_command(cmd, log_path, env=cmd_env)
     if exit_code != 0:
-        raise SystemExit(f'command failed ({exit_code}) during recovery: {" ".join(cmd)}; see {log_path}')
+        log_tail = read_log_tail(log_path)
+        detail = f'\n--- log tail ({log_path}) ---\n{log_tail}' if log_tail else f'; see {log_path}'
+        raise SystemExit(f'command failed ({exit_code}) during recovery: {" ".join(cmd)}{detail}')
     if not expected_path.exists():
         raise SystemExit(f'missing expected CLI output after recovery for {corpus_name}/{op_key}: {expected_path}')
 
@@ -211,6 +213,14 @@ def run_command(cmd: list[str], log_path: Path, *, env: dict[str, str] | None = 
     with log_path.open('w', encoding='utf-8') as lf:
         proc = subprocess.run(cmd, stdout=lf, stderr=subprocess.STDOUT, check=False, env=env)
     return proc.returncode
+
+
+def read_log_tail(path: Path, max_lines: int = 80) -> str:
+    if not path.exists():
+        return ''
+    with path.open('r', encoding='utf-8', errors='replace') as f:
+        lines = f.readlines()
+    return ''.join(lines[-max_lines:])
 
 
 def build_dj_invocation(
@@ -527,7 +537,9 @@ def main() -> None:
                     print(f'[{corpus_name}] running {op_kind} {op_name}')
                     exit_code = run_command(cmd, log_path, env=cmd_env)
                     if exit_code != 0:
-                        raise SystemExit(f'command failed ({exit_code}): {" ".join(cmd)}; see {log_path}')
+                        log_tail = read_log_tail(log_path)
+                        detail = f'\n--- log tail ({log_path}) ---\n{log_tail}' if log_tail else f'; see {log_path}'
+                        raise SystemExit(f'command failed ({exit_code}): {" ".join(cmd)}{detail}')
 
             if not expected_path.exists():
                 raise SystemExit(f'missing expected CLI output for {corpus_name}/{op_key}: {expected_path}')
