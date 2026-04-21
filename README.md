@@ -198,8 +198,11 @@ sed -n '1,160p' data/processed/workflow_mining/web/workflow_candidates.yaml
 .venv-ops/bin/python scripts/prepare_data/materialize_domain_workflows.py \
   --workflow-mining-dir data/processed/workflow_mining \
   --filtered-path data/processed/domain_filtered/all.jsonl \
-  --output-dir data/processed/workflow_library
+  --output-dir data/processed/workflow_library \
+  --resume
 ```
+
+`--resume` 会按 domain 跳过已经完整生成的结果；如果某个 domain 的输出缺文件或 yaml 读不出来，会自动重新跑这个 domain。运行时脚本会打印当前 domain、workflow 进度，以及每个 workflow 产出的 checkpoint stats / 主榜 variants / order families 数量。
 
 这一步会做三件事：
 

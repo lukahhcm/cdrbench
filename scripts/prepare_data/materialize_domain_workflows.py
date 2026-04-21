@@ -55,6 +55,18 @@ EXPENSIVE_LONG_TEXT_MAPPERS = {
     'remove_repeat_sentences_mapper',
     'remove_words_with_incorrect_substrings_mapper',
 }
+DOMAIN_OUTPUT_FILES = [
+    'workflow_library.yaml',
+    'workflow_variants.csv',
+    'filter_attachments.csv',
+    'checkpoint_filter_stats.csv',
+    'order_sensitivity_candidates.csv',
+    'order_sensitivity_families.csv',
+]
+
+
+def _log(message: str) -> None:
+    print(message, flush=True)
 
 
 def iter_jsonl(path: Path) -> Iterable[dict[str, Any]]:
@@ -251,6 +263,48 @@ def _workflow_rows_for_domain(domain_dir: Path) -> list[dict[str, Any]]:
         return []
     df = pd.read_csv(workflow_csv)
     return df.to_dict(orient='records')
+
+
+def _domain_outputs_complete(domain_out_dir: Path) -> bool:
+    return all((domain_out_dir / filename).exists() for filename in DOMAIN_OUTPUT_FILES)
+
+
+def _load_domain_yaml(domain_out_dir: Path) -> dict[str, Any] | None:
+    try:
+        with (domain_out_dir / 'workflow_library.yaml').open('r', encoding='utf-8') as f:
+            payload = yaml.safe_load(f)
+    except Exception:
+        return None
+    return payload if isinstance(payload, dict) and isinstance(payload.get('workflows'), list) else None
+
+
+def _summary_rows_from_domain_yaml(domain_yaml: dict[str, Any]) -> list[dict[str, Any]]:
+    domain = domain_yaml.get('domain')
+    rows = []
+    for workflow in domain_yaml.get('workflows', []):
+        if not isinstance(workflow, dict):
+            continue
+        main_variants = workflow.get('main_workflow_variants') or []
+        order_variants = workflow.get('order_sensitivity_variants') or []
+        order_families = workflow.get('order_sensitivity_families') or []
+        rows.append(
+            {
+                'domain': domain,
+                'workflow_id': workflow.get('workflow_id'),
+                'support': int(workflow.get('support', 0) or 0),
+                'mapper_length': len(workflow.get('ordered_clean_sequence') or []),
+                'num_main_variants': len(main_variants),
+                'num_order_sensitivity_variants': len(order_variants),
+                'num_order_sensitivity_families': len(order_families),
+                'num_filter_then_clean': sum(
+                    1 for variant in main_variants if variant.get('workflow_type') == 'filter-then-clean'
+                ),
+                'num_clean_then_filter': sum(
+                    1 for variant in main_variants if variant.get('workflow_type') == 'clean-then-filter'
+                ),
+            }
+        )
+    return rows
 
 
 def _ordered_mapper_sequence(
@@ -648,6 +702,7 @@ def main() -> None:
     parser.add_argument('--max-support-records', type=int, default=128)
     parser.add_argument('--min-filter-support', type=int, default=5)
     parser.add_argument('--max-filters-per-workflow', type=int, default=3)
+    parser.add_argument('--resume', action='store_true', help='Skip domains whose workflow-library outputs already exist.')
     args = parser.parse_args()
 
     root = ROOT
@@ -663,22 +718,44 @@ def main() -> None:
     if not workflow_mining_dir.exists():
         raise SystemExit(f'workflow mining dir not found: {workflow_mining_dir}')
 
+    _log(f'loading filtered corpus -> {filtered_path}')
     records_by_domain: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for record in iter_jsonl(filtered_path):
         domain = record.get('domain')
         if domain:
             records_by_domain[str(domain)].append(record)
+    _log(
+        'loaded records by domain: '
+        + ', '.join(f'{domain}={len(records)}' for domain, records in sorted(records_by_domain.items()))
+    )
 
     summary_rows: list[dict[str, Any]] = []
     global_yaml = {'domains': {}}
+    domain_dirs = sorted(path for path in workflow_mining_dir.iterdir() if path.is_dir())
+    _log(f'found {len(domain_dirs)} workflow-mining domain dirs -> {workflow_mining_dir}')
 
-    for domain_dir in sorted(path for path in workflow_mining_dir.iterdir() if path.is_dir()):
+    for domain_index, domain_dir in enumerate(domain_dirs, start=1):
         domain = domain_dir.name
+        domain_out_dir = output_dir / domain
+        if args.resume and _domain_outputs_complete(domain_out_dir):
+            existing_domain_yaml = _load_domain_yaml(domain_out_dir)
+            if existing_domain_yaml is not None:
+                global_yaml['domains'][domain] = existing_domain_yaml
+                summary_rows.extend(_summary_rows_from_domain_yaml(existing_domain_yaml))
+                _log(f'[{domain_index}/{len(domain_dirs)}] {domain}: resume skip complete outputs')
+                continue
+            _log(f'[{domain_index}/{len(domain_dirs)}] {domain}: resume found outputs but yaml is unreadable; recomputing')
+
         workflow_rows = _workflow_rows_for_domain(domain_dir)
         if not workflow_rows:
+            _log(f'[{domain_index}/{len(domain_dirs)}] {domain}: no selected_workflows.csv rows; skip')
             continue
 
         domain_records = records_by_domain.get(domain, [])
+        _log(
+            f'[{domain_index}/{len(domain_dirs)}] {domain}: materializing '
+            f'{len(workflow_rows)} workflows using {len(domain_records)} domain records'
+        )
         ordered_filter_variants = _domain_filter_variants(domain, plan)
         domain_yaml = {'domain': domain, 'workflows': []}
         attachment_rows: list[dict[str, Any]] = []
@@ -687,7 +764,7 @@ def main() -> None:
         order_family_rows: list[dict[str, Any]] = []
         variant_rows: list[dict[str, Any]] = []
 
-        for row in workflow_rows:
+        for workflow_index, row in enumerate(workflow_rows, start=1):
             workflow_id = str(row['workflow_id'])
             operator_set = _parse_operator_set(str(row['operators']))
             ordered_mappers = _ordered_mapper_sequence(domain, operator_set, plan)
@@ -695,6 +772,10 @@ def main() -> None:
                 domain_records,
                 operator_set,
                 max_records=args.max_support_records,
+            )
+            _log(
+                f'  [{workflow_index}/{len(workflow_rows)}] {domain}/{workflow_id}: '
+                f'{len(ordered_mappers)} clean ops, {len(support_records)} support records'
             )
             filter_checkpoint_rows, attachment_candidates = _collect_checkpoint_filter_stats(
                 ordered_mappers=ordered_mappers,
@@ -729,6 +810,12 @@ def main() -> None:
                 raw_attachments=raw_attachments,
                 final_attachments=final_attachments,
                 order_families=order_families,
+            )
+            _log(
+                f'    -> checkpoint_stats={len(filter_checkpoint_rows)}, '
+                f'main_variants={len(main_variants)}, '
+                f'order_families={len(materialized_order_families)}, '
+                f'order_variants={len(order_variants)}'
             )
             all_variants = [*main_variants, *order_variants]
             mapper_sequence = ' -> '.join(variant['name'] for variant in ordered_mappers)
@@ -853,7 +940,6 @@ def main() -> None:
             )
 
         global_yaml['domains'][domain] = domain_yaml
-        domain_out_dir = output_dir / domain
         domain_out_dir.mkdir(parents=True, exist_ok=True)
         with (domain_out_dir / 'workflow_library.yaml').open('w', encoding='utf-8') as f:
             yaml.safe_dump(domain_yaml, f, sort_keys=False, allow_unicode=True)
@@ -862,6 +948,7 @@ def main() -> None:
         pd.DataFrame(checkpoint_rows).to_csv(domain_out_dir / 'checkpoint_filter_stats.csv', index=False)
         pd.DataFrame(order_candidate_rows).to_csv(domain_out_dir / 'order_sensitivity_candidates.csv', index=False)
         pd.DataFrame(order_family_rows).to_csv(domain_out_dir / 'order_sensitivity_families.csv', index=False)
+        _log(f'[{domain_index}/{len(domain_dirs)}] {domain}: wrote outputs -> {domain_out_dir}')
 
     with (output_dir / 'workflow_library.yaml').open('w', encoding='utf-8') as f:
         yaml.safe_dump(global_yaml, f, sort_keys=False, allow_unicode=True)
