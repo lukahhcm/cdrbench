@@ -191,7 +191,8 @@ column -s, -t < data/processed/workflow_library/web/checkpoint_filter_stats.csv 
   --min-drop 5 \
   --min-order-sensitive-groups 5 \
   --min-atomic-keep 3 \
-  --min-atomic-drop 3
+  --min-atomic-drop 3 \
+  --resume
 ```
 
 This step does not generate prompts yet. It selects samples and runs deterministic references.
@@ -222,6 +223,7 @@ Important parameters:
 - `--min-keep / --min-drop`: skip main filter variants without enough keep/drop candidates
 - `--min-order-sensitive-groups`: skip order families without enough genuinely order-sensitive groups
 - `--min-atomic-keep / --min-atomic-drop`: skip atomic filters without enough keep/drop candidates
+- `--resume`: reuse per-variant cache shards in `data/benchmark/_materialize_cache/` after an interrupted run
 
 Thresholds are recalibrated during materialization. Length/count thresholds are rounded to human-readable values such as 5, 10, 50, 100, and 1000. Ratios usually use a 0.01 grid, while very small ratios may keep finer 0.001 or 0.0001 grids.
 

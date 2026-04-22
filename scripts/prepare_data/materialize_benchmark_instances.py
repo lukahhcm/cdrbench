@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import shutil
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -57,6 +58,45 @@ def _write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> int:
             count += 1
     tmp_path.replace(path)
     return count
+
+
+def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+    rows = []
+    with path.open('r', encoding='utf-8') as f:
+        for line in f:
+            if line.strip():
+                rows.append(json.loads(line))
+    return rows
+
+
+def _write_json(path: Path, payload: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_suffix(path.suffix + '.tmp')
+    tmp_path.write_text(json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + '\n', encoding='utf-8')
+    tmp_path.replace(path)
+
+
+def _safe_cache_key(value: str) -> str:
+    return ''.join(ch if ch.isalnum() or ch in {'-', '_', '.'} else '_' for ch in value)
+
+
+def _cache_paths(cache_dir: Path, track: str, key: str) -> tuple[Path, Path]:
+    safe_key = _safe_cache_key(key)
+    track_dir = cache_dir / track
+    return track_dir / f'{safe_key}.jsonl', track_dir / f'{safe_key}.summary.json'
+
+
+def _load_cache(cache_dir: Path, track: str, key: str) -> tuple[list[dict[str, Any]], Any] | None:
+    rows_path, summary_path = _cache_paths(cache_dir, track, key)
+    if not rows_path.exists() or not summary_path.exists():
+        return None
+    return _read_jsonl(rows_path), json.loads(summary_path.read_text(encoding='utf-8'))
+
+
+def _write_cache(cache_dir: Path, track: str, key: str, rows: list[dict[str, Any]], summary: Any) -> None:
+    rows_path, summary_path = _cache_paths(cache_dir, track, key)
+    _write_jsonl(rows_path, rows)
+    _write_json(summary_path, summary)
 
 
 def _operator_lookup(plan: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -755,12 +795,18 @@ def main() -> None:
     parser.add_argument('--min-atomic-keep', type=int, default=5)
     parser.add_argument('--min-atomic-drop', type=int, default=5)
     parser.add_argument('--skip-atomic', action='store_true', help='Only materialize main/order instances.')
+    parser.add_argument(
+        '--resume',
+        action='store_true',
+        help='Reuse per-variant cache shards in output-dir/_materialize_cache after an interrupted run.',
+    )
     args = parser.parse_args()
 
     root = ROOT
     workflow_library_dir = (root / args.workflow_library_dir).resolve()
     filtered_path = (root / args.filtered_path).resolve()
     output_dir = (root / args.output_dir).resolve()
+    cache_dir = output_dir / '_materialize_cache'
 
     if not workflow_library_dir.exists():
         raise SystemExit(f'workflow library dir not found: {workflow_library_dir}')
@@ -768,6 +814,9 @@ def main() -> None:
         raise SystemExit(f'filtered corpus not found: {filtered_path}')
     if not 0.0 < args.target_drop_rate < 1.0:
         raise SystemExit('--target-drop-rate must be in (0, 1)')
+    output_dir.mkdir(parents=True, exist_ok=True)
+    if cache_dir.exists() and not args.resume:
+        shutil.rmtree(cache_dir)
 
     domains_cfg = load_domains_config(root / args.domains_config)
     plan = build_domain_execution_plan(domains_cfg)
@@ -795,7 +844,13 @@ def main() -> None:
     atomic_summary_rows: list[dict[str, Any]] = []
 
     if not args.skip_atomic:
-        atomic_rows, atomic_summary_rows = _materialize_atomic_ops(records_by_domain, plan, operators_by_name, args)
+        cached = _load_cache(cache_dir, 'atomic', 'atomic_ops') if args.resume else None
+        if cached is not None:
+            atomic_rows, atomic_summary_rows = cached
+            _log(f'atomic global: cached selected={len(atomic_rows)} summaries={len(atomic_summary_rows)}')
+        else:
+            atomic_rows, atomic_summary_rows = _materialize_atomic_ops(records_by_domain, plan, operators_by_name, args)
+            _write_cache(cache_dir, 'atomic', 'atomic_ops', atomic_rows, atomic_summary_rows)
 
     for domain_index, (domain, domain_yaml) in enumerate(sorted(domain_workflows.items()), start=1):
         workflows = list(domain_yaml.get('workflows') or [])
@@ -810,20 +865,32 @@ def main() -> None:
                 f'{len(main_variants)} main variants, {len(order_families)} order families'
             )
             for variant in main_variants:
-                rows, summary = _materialize_main_variant(domain, workflow, variant, records, operators_by_name, args)
+                variant_id = variant['workflow_variant_id']
+                cached = _load_cache(cache_dir, 'main', variant_id) if args.resume else None
+                if cached is not None:
+                    rows, summary = cached
+                else:
+                    rows, summary = _materialize_main_variant(domain, workflow, variant, records, operators_by_name, args)
+                    _write_cache(cache_dir, 'main', variant_id, rows, summary)
                 main_rows.extend(rows)
                 main_summary_rows.append(summary)
                 _log(
-                    f"    main {variant['workflow_variant_id']}: {summary['status']} "
+                    f"    main {variant_id}: {summary['status']} "
                     f"selected={summary['selected_count']} keep={summary.get('keep_count', 0)} drop={summary.get('drop_count', 0)}"
                 )
 
             for family in order_families:
-                rows, summary = _materialize_order_family(domain, workflow, family, records, operators_by_name, args)
+                family_id = family['order_family_id']
+                cached = _load_cache(cache_dir, 'order_sensitivity', family_id) if args.resume else None
+                if cached is not None:
+                    rows, summary = cached
+                else:
+                    rows, summary = _materialize_order_family(domain, workflow, family, records, operators_by_name, args)
+                    _write_cache(cache_dir, 'order_sensitivity', family_id, rows, summary)
                 order_rows.extend(rows)
                 order_summary_rows.append(summary)
                 _log(
-                    f"    order {family['order_family_id']}: {summary['status']} "
+                    f"    order {family_id}: {summary['status']} "
                     f"groups={summary.get('selected_group_count', 0)} variants={summary.get('selected_variant_count', 0)}"
                 )
 
