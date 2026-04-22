@@ -417,12 +417,18 @@ def _patch_nltk_pickle_security() -> None:
 def install_shims() -> None:
     _install_optional_module_shims()
 
-    _ensure_module('data_juicer', package=True)
-    _ensure_module('data_juicer.utils', package=True)
-    _ensure_module('data_juicer.ops', package=True)
-    _ensure_module('data_juicer.ops.mapper', package=True)
-    _ensure_module('data_juicer.ops.filter', package=True)
-    _ensure_module('data_juicer.ops.common', package=True)
+    data_juicer_mod = _ensure_module('data_juicer', package=True)
+    utils_mod = _ensure_module('data_juicer.utils', package=True)
+    ops_mod = _ensure_module('data_juicer.ops', package=True)
+    mapper_mod = _ensure_module('data_juicer.ops.mapper', package=True)
+    filter_mod = _ensure_module('data_juicer.ops.filter', package=True)
+    common_pkg_mod = _ensure_module('data_juicer.ops.common', package=True)
+    data_juicer_mod.__path__ = [str(DJ_SOURCE)]
+    utils_mod.__path__ = [str(DJ_SOURCE / 'utils')]
+    ops_mod.__path__ = [str(DJ_SOURCE / 'ops')]
+    mapper_mod.__path__ = [str(DJ_SOURCE / 'ops' / 'mapper')]
+    filter_mod.__path__ = [str(DJ_SOURCE / 'ops' / 'filter')]
+    common_pkg_mod.__path__ = [str(DJ_SOURCE / 'ops' / 'common')]
 
     constant_mod = _ensure_module('data_juicer.utils.constant')
     constant_mod.Fields = Fields
@@ -492,6 +498,11 @@ def load_operator_module(op_name: str):
 
 def create_operator(op_name: str, **kwargs):
     load_operator_module(op_name)
+    if op_name not in OPERATORS.modules:
+        raise RuntimeError(
+            f'Operator module loaded but did not register {op_name}. '
+            f'Check the @OPERATORS.register_module name in {_resolve_operator_spec(op_name).file_path}.'
+        )
     cls = OPERATORS.modules[op_name]
     return cls(**kwargs)
 
