@@ -335,7 +335,6 @@ def _active_records_for_mapper(
 
 def _atomic_record(
     *,
-    domain: str,
     op_name: str,
     op_kind: str,
     record: dict[str, Any],
@@ -343,10 +342,12 @@ def _atomic_record(
     execution: dict[str, Any],
     threshold_meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    source_domain = str(record.get('domain') or 'unknown')
     return {
-        'instance_id': _stable_id('atomic', domain, op_name, _record_id(record)),
+        'instance_id': _stable_id('atomic', op_name, _record_id(record)),
         'benchmark_track': 'atomic',
-        'domain': domain,
+        'domain': 'atomic',
+        'source_domain': source_domain,
         'operator': op_name,
         'operator_kind': op_kind,
         'source_record_id': _record_id(record),
@@ -362,13 +363,12 @@ def _atomic_record(
 
 
 def _materialize_atomic_mapper(
-    domain: str,
     op_name: str,
     records: list[dict[str, Any]],
     operators_by_name: dict[str, dict[str, Any]],
     args: argparse.Namespace,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    candidates = _active_records_for_mapper(records, op_name, args.max_atomic_candidate_records, f'atomic:{domain}:{op_name}')
+    candidates = _active_records_for_mapper(records, op_name, args.max_atomic_candidate_records, f'atomic:{op_name}')
     rows = []
     for record in candidates:
         try:
@@ -378,7 +378,6 @@ def _materialize_atomic_mapper(
         if execution['reference_status'] == 'KEEP' and execution['reference_text'] != str(record.get('text', '')):
             rows.append(
                 _atomic_record(
-                    domain=domain,
                     op_name=op_name,
                     op_kind='mapper',
                     record=record,
@@ -388,8 +387,8 @@ def _materialize_atomic_mapper(
             )
         if len(rows) >= args.max_atomic_instances_per_op:
             break
+    source_domain_counts = dict(sorted(pd.Series([row['source_domain'] for row in rows]).value_counts().items())) if rows else {}
     return rows, {
-        'domain': domain,
         'operator': op_name,
         'operator_kind': 'mapper',
         'status': 'kept' if rows else 'skipped_no_active_outputs',
@@ -397,13 +396,13 @@ def _materialize_atomic_mapper(
         'selected_count': len(rows),
         'selected_keep_count': len(rows),
         'selected_drop_count': 0,
+        'source_domain_counts': source_domain_counts,
         'threshold_meta': {},
         'filter_params': {},
     }
 
 
 def _materialize_atomic_filter(
-    domain: str,
     op_name: str,
     records: list[dict[str, Any]],
     operators_by_name: dict[str, dict[str, Any]],
@@ -411,7 +410,7 @@ def _materialize_atomic_filter(
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     candidates = sorted(
         records,
-        key=lambda row: _stable_id(f'atomic:{domain}:{op_name}', row.get('id'), row.get('source_name'), row.get('url')),
+        key=lambda row: _stable_id(f'atomic:{op_name}', row.get('id'), row.get('source_name'), row.get('url')),
     )[: args.max_atomic_candidate_records]
     base_params = _base_params(op_name, operators_by_name)
     values = []
@@ -449,7 +448,6 @@ def _materialize_atomic_filter(
         except Exception:
             continue
         row = _atomic_record(
-            domain=domain,
             op_name=op_name,
             op_kind='filter',
             record=record,
@@ -465,8 +463,12 @@ def _materialize_atomic_filter(
     selected = _select_balanced(keep_rows, drop_rows, args.max_atomic_instances_per_op, args.target_drop_rate)
     has_min_balance = len(keep_rows) >= args.min_atomic_keep and len(drop_rows) >= args.min_atomic_drop
     selected_rows = selected if has_min_balance else []
+    source_domain_counts = (
+        dict(sorted(pd.Series([row['source_domain'] for row in selected_rows]).value_counts().items()))
+        if selected_rows
+        else {}
+    )
     return selected_rows, {
-        'domain': domain,
         'operator': op_name,
         'operator_kind': 'filter',
         'status': 'kept' if selected_rows else 'skipped_unbalanced',
@@ -477,6 +479,7 @@ def _materialize_atomic_filter(
         'selected_count': len(selected_rows),
         'selected_keep_count': sum(1 for row in selected_rows if row['reference_status'] == 'KEEP'),
         'selected_drop_count': sum(1 for row in selected_rows if row['reference_status'] == 'DROP'),
+        'source_domain_counts': source_domain_counts,
         'threshold_meta': threshold_meta,
         'filter_params': calibrated_params,
     }
@@ -490,29 +493,30 @@ def _materialize_atomic_ops(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     rows: list[dict[str, Any]] = []
     summary_rows: list[dict[str, Any]] = []
-    variants_by_key = plan['execution_variants_by_key']
-    for domain in sorted(plan['domain_profiles']):
-        profile = plan['domain_profiles'][domain]
-        records = records_by_domain.get(domain, [])
-        mapper_names = [variants_by_key[key]['name'] for key in profile['mapper_keys']]
-        filter_names = [variants_by_key[key]['name'] for key in profile['filter_keys']]
-        _log(f'atomic {domain}: {len(mapper_names)} mappers, {len(filter_names)} filters, {len(records)} records')
+    all_records = [record for domain in sorted(records_by_domain) for record in records_by_domain[domain]]
+    mapper_names = sorted(
+        {variant['name'] for variant in plan['execution_variants'] if variant['kind'] == 'mapper'}
+    )
+    filter_names = sorted(
+        {variant['name'] for variant in plan['execution_variants'] if variant['kind'] == 'filter'}
+    )
+    _log(f'atomic global: {len(mapper_names)} unique mappers, {len(filter_names)} unique filters, {len(all_records)} records')
 
-        for op_name in mapper_names:
-            op_rows, summary = _materialize_atomic_mapper(domain, op_name, records, operators_by_name, args)
-            rows.extend(op_rows)
-            summary_rows.append(summary)
-            _log(f"  atomic mapper {domain}/{op_name}: {summary['status']} selected={summary['selected_count']}")
+    for op_name in mapper_names:
+        op_rows, summary = _materialize_atomic_mapper(op_name, all_records, operators_by_name, args)
+        rows.extend(op_rows)
+        summary_rows.append(summary)
+        _log(f"  atomic mapper {op_name}: {summary['status']} selected={summary['selected_count']}")
 
-        for op_name in filter_names:
-            op_rows, summary = _materialize_atomic_filter(domain, op_name, records, operators_by_name, args)
-            rows.extend(op_rows)
-            summary_rows.append(summary)
-            _log(
-                f"  atomic filter {domain}/{op_name}: {summary['status']} "
-                f"selected={summary['selected_count']} keep={summary.get('selected_keep_count', 0)} "
-                f"drop={summary.get('selected_drop_count', 0)}"
-            )
+    for op_name in filter_names:
+        op_rows, summary = _materialize_atomic_filter(op_name, all_records, operators_by_name, args)
+        rows.extend(op_rows)
+        summary_rows.append(summary)
+        _log(
+            f"  atomic filter {op_name}: {summary['status']} "
+            f"selected={summary['selected_count']} keep={summary.get('selected_keep_count', 0)} "
+            f"drop={summary.get('selected_drop_count', 0)}"
+        )
 
     return rows, summary_rows
 

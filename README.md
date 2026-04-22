@@ -306,7 +306,7 @@ column -s, -t < data/processed/workflow_library/workflow_library_summary.csv | l
 
 主榜带 filter 的 workflow 会重新按目标 drop rate 校准阈值，然后尽量均衡抽取 KEEP/DROP 样本。次榜按 `order_family` 校准共享阈值，同一个输入同时跑 `front / middle / end`，只保留至少两个 slot 的 reference 不同的样本。
 
-单算子 atomic 集用于后续估计 `Operator Atomic Difficulty`：mapper 只保留输出确实变化的样本，filter 会按同样的 `target-drop-rate` 校准阈值并尽量均衡 KEEP/DROP。若暂时不想生成 atomic 集，可以加 `--skip-atomic`。
+单算子 atomic 集用于后续估计 `Operator Atomic Difficulty`：它按全局 operator 采样，不按 domain 重复建任务；mapper 只保留输出确实变化的样本，filter 会按同样的 `target-drop-rate` 校准阈值并尽量均衡 KEEP/DROP。实例里会保留 `source_domain` 方便诊断。若暂时不想生成 atomic 集，可以加 `--skip-atomic`。
 
 校准出来的阈值会被转成更像真实需求里的粗粒度数值：长度/数量阈值会落到 5、10、50、100、1000 等可读档位；ratio 通常落到 0.01 的网格，但极小比例会保留到 0.001 或 0.0001。summary 里仍会保留 `threshold_raw_value` 方便 debug。
 
