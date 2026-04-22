@@ -51,7 +51,7 @@ FILTER_CALIBRATION_RULES: dict[str, dict[str, Any]] = {
 }
 INTEGER_THRESHOLD_KEYS = {'min_len', 'max_len', 'min_num', 'max_num'}
 RATIO_THRESHOLD_KEYS = {'min_ratio', 'max_ratio'}
-RATIO_THRESHOLD_STEP = 0.05
+RATIO_THRESHOLD_STEP = 0.01
 
 SAFE_MAX_CHARS_FOR_EXPENSIVE_MAPPERS = 80_000
 EXPENSIVE_LONG_TEXT_MAPPERS = {
@@ -208,8 +208,6 @@ def _round_float(value: float | None) -> float | None:
 
 def _integer_threshold_step(value: float) -> int:
     abs_value = abs(value)
-    if abs_value <= 10:
-        return 1
     if abs_value <= 50:
         return 5
     if abs_value <= 100:
@@ -227,7 +225,7 @@ def _format_threshold_value(value: float | None, param_key: str) -> int | float 
     if param_key in INTEGER_THRESHOLD_KEYS:
         step = _integer_threshold_step(value)
         rounded = int(round(value / step) * step)
-        return max(1, rounded) if value > 0 else rounded
+        return max(5, rounded) if value > 0 else rounded
     if param_key in RATIO_THRESHOLD_KEYS:
         rounded = round(value / RATIO_THRESHOLD_STEP) * RATIO_THRESHOLD_STEP
         if value > 0 and rounded == 0:
