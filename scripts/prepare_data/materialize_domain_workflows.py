@@ -315,6 +315,10 @@ def _workflow_rows_for_domain(domain_dir: Path) -> list[dict[str, Any]]:
     if not workflow_csv.exists():
         return []
     df = pd.read_csv(workflow_csv)
+    if 'selection_source' in df.columns:
+        df = df[df['selection_source'] != 'coverage_fallback_unassigned_signature']
+    elif 'selection_reason' in df.columns:
+        df = df[df['selection_reason'] != 'coverage_fallback_unassigned_signature']
     return df.to_dict(orient='records')
 
 

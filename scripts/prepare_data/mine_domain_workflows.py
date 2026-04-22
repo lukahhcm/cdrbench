@@ -355,6 +355,7 @@ def _build_domain_report(
         'notes': [
             'Bottom-up mining is based on active operator sets from tagging outputs.',
             f'Concrete workflows are only kept if support >= {min_workflow_support}.',
+            'Fallback workflow candidates are reported for inspection but excluded from selected_workflows.csv.',
             'Concrete workflow candidates still need manual ordering and activation-spec curation.',
         ],
     }
@@ -364,7 +365,7 @@ def _build_domain_report(
         pd.DataFrame(exact_rows),
         pd.DataFrame(subset_rows),
         pd.DataFrame(family_rows),
-        pd.DataFrame(workflow_rows + fallback_rows),
+        pd.DataFrame(workflow_rows),
     )
 
 
