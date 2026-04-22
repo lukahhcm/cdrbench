@@ -283,7 +283,16 @@ column -s, -t < data/processed/workflow_library/workflow_library_summary.csv | l
   --filtered-path data/processed/domain_filtered/all.jsonl \
   --output-dir data/benchmark \
   --target-drop-rate 0.5 \
-  --max-atomic-instances-per-op 20
+  --max-candidate-records 2000 \
+  --max-instances-per-variant 50 \
+  --max-order-groups-per-family 30 \
+  --max-atomic-candidate-records 1000 \
+  --max-atomic-instances-per-op 10 \
+  --min-keep 5 \
+  --min-drop 5 \
+  --min-order-sensitive-groups 5 \
+  --min-atomic-keep 3 \
+  --min-atomic-drop 3
 ```
 
 这一步暂时不生成 prompt，只做样本选择和 GT：
@@ -300,6 +309,24 @@ column -s, -t < data/processed/workflow_library/workflow_library_summary.csv | l
 单算子 atomic 集用于后续估计 `Operator Atomic Difficulty`：mapper 只保留输出确实变化的样本，filter 会按同样的 `target-drop-rate` 校准阈值并尽量均衡 KEEP/DROP。若暂时不想生成 atomic 集，可以加 `--skip-atomic`。
 
 校准出来的阈值会被转成更像真实需求里的粗粒度数值：长度/数量阈值会落到 5、10、50、100、1000 等可读档位；ratio 通常落到 0.01 的网格，但极小比例会保留到 0.001 或 0.0001。summary 里仍会保留 `threshold_raw_value` 方便 debug。
+
+这组参数的目标规模大致是：
+
+- 主榜约 `5k` 条 instances
+- 顺序敏感次榜约 `1k` 个 order groups，也就是约 `3k` 条 variant instances
+- atomic 单算子集约 `1k` 条 instances，每个 op 最多 10 条
+
+参数含义：
+
+- `--target-drop-rate 0.5`：带 filter 的任务尽量校准成 50% KEEP / 50% DROP
+- `--max-candidate-records 2000`：每个 workflow variant 或 order family 最多扫描 2000 条候选样本
+- `--max-instances-per-variant 50`：主榜每个 workflow variant 最多输出 50 条
+- `--max-order-groups-per-family 30`：次榜每个 order family 最多输出 30 个 input groups，每组对应 front/middle/end 三条
+- `--max-atomic-candidate-records 1000`：每个 atomic op 最多扫描 1000 条候选样本
+- `--max-atomic-instances-per-op 10`：每个 atomic op 最多输出 10 条
+- `--min-keep / --min-drop`：主榜 filter workflow 至少要有这些 KEEP/DROP 候选，否则跳过
+- `--min-order-sensitive-groups`：order family 至少要有这些真正顺序敏感的 input groups，否则跳过
+- `--min-atomic-keep / --min-atomic-drop`：atomic filter 至少要有这些 KEEP/DROP 候选，否则跳过
 
 如果你后面要把 workflow 自动转成自然语言指令，可以直接参考：
 
