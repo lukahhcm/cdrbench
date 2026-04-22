@@ -319,12 +319,15 @@ def _build_domain_report(
         fallback_rows.append(
             {
                 'domain': domain,
+                'family_id': f'{domain}_fallback_family_01',
+                'workflow_id': f'{domain}_fallback_wf_{rank:02d}',
                 'rank': rank,
                 'operators': ' | '.join(ops),
                 'length': len(ops),
                 'support': support,
                 'support_ratio': support / num_records if num_records else 0.0,
                 'selection_reason': 'coverage_fallback_unassigned_signature',
+                'selection_source': 'coverage_fallback_unassigned_signature',
             }
         )
 

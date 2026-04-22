@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -288,6 +289,17 @@ def _threshold_rule_label(op_name: str) -> str:
 
 def _parse_operator_set(blob: str) -> list[str]:
     return [item.strip() for item in blob.split(' | ') if item.strip()]
+
+
+def _clean_optional_id(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, float) and math.isnan(value):
+        return None
+    text = str(value).strip()
+    if not text or text.lower() == 'nan':
+        return None
+    return text
 
 
 def _labeling_meta(record: dict[str, Any]) -> dict[str, Any]:
@@ -806,7 +818,7 @@ def main() -> None:
         variant_rows: list[dict[str, Any]] = []
 
         for workflow_index, row in enumerate(workflow_rows, start=1):
-            workflow_id = str(row['workflow_id'])
+            workflow_id = _clean_optional_id(row.get('workflow_id')) or f'{domain}_wf_auto_{workflow_index:03d}'
             operator_set = _parse_operator_set(str(row['operators']))
             ordered_mappers = _ordered_mapper_sequence(domain, operator_set, plan)
             support_records = _supporting_records(
@@ -947,7 +959,7 @@ def main() -> None:
             domain_yaml['workflows'].append(
                 {
                     'workflow_id': workflow_id,
-                    'family_id': row.get('family_id'),
+                    'family_id': _clean_optional_id(row.get('family_id')) or f'{domain}_auto_family',
                     'selection_source': row.get('selection_source', 'bottom_up_exact_signature'),
                     'support': int(row.get('support', 0) or 0),
                     'support_ratio': float(row.get('support_ratio', 0.0) or 0.0),
