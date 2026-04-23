@@ -7,7 +7,7 @@ from typing import Any
 
 
 DEFAULT_BASE_URL = "http://123.57.212.178:3333/v1"
-DEFAULT_MODEL = "gpt-4.1-2025-04-14"
+DEFAULT_MODEL = "gpt-5.4"
 
 
 def resolve_api_key(explicit: str | None = None) -> str:

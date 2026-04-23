@@ -28,13 +28,26 @@ TRACK_FILES = {
 
 SKIPPED_OPERATORS = {'flagged_words_filter', 'stopwords_filter'}
 
+FILTER_THRESHOLD_EXPRESSION_GUIDE = {
+    'alphanumeric_filter': 'Say this as a minimum share of alphanumeric content, e.g., "keep only text where at least 60% of the characters are letters or numbers."',
+    'average_line_length_filter': 'Say this as an average line-length limit, e.g., "keep only documents whose average line length is no more than 80 characters."',
+    'character_repetition_filter': 'Say this as a maximum repeated-character ratio, e.g., "reject text where repeated character patterns exceed 20%."',
+    'flagged_words_filter': 'Say this as a maximum flagged-word share, e.g., "keep only text where flagged terms make up less than 0.1%."',
+    'maximum_line_length_filter': 'Say this as a longest-line limit, e.g., "reject samples with any line longer than 200 characters."',
+    'special_characters_filter': 'Say this as a maximum special-character share, e.g., "keep only text where special characters are below 15%."',
+    'stopwords_filter': 'Say this as a minimum natural-language stopword share, e.g., "keep only text with at least 5% common function words."',
+    'text_length_filter': 'Say this as a character-count constraint, e.g., "keep only text with at least 100 characters."',
+    'word_repetition_filter': 'Say this as a maximum repeated-word ratio, e.g., "reject text where repeated words exceed 20%."',
+    'words_num_filter': 'Say this as a word-count constraint, e.g., "keep only documents with at least 50 words."',
+}
+
 STYLE_PRESETS = [
     {
         'style_id': 'imperative_checklist',
         'label': 'Imperative Checklist',
         'definition': 'A direct command that lists the required operations explicitly and in order.',
         'template': 'Please perform the following operations on the text: {requirement}.',
-        'example': 'Please clean this web page by removing the HTML, stripping links, normalizing the whitespace, and then deciding whether the result is useful enough to keep.',
+        'example': 'Please clean this web page by removing the HTML, stripping links, normalizing the whitespace, and then keep it only if the cleaned text has at least 100 characters.',
         'guidance': 'Write a direct step-by-step request with explicit sequencing, like a user telling an assistant exactly what to do.',
     },
     {
@@ -42,7 +55,7 @@ STYLE_PRESETS = [
         'label': 'Goal-Oriented Description',
         'definition': 'A prose description that emphasizes the intended final state rather than a numbered procedure.',
         'template': 'The goal is to make the data suitable for {use_case}; it should end up with {requirement}.',
-        'example': 'The goal is to make these help documents clean enough for a support index, with links removed, repeated template sentences cleaned up, and spacing made consistent before deciding whether each document is worth retaining.',
+        'example': 'The goal is to make these help documents clean enough for a support index, with links removed, repeated template sentences cleaned up, spacing made consistent, and only documents with no more than 20% repeated words retained.',
         'guidance': 'Describe the goal and desired cleanup outcome in fluent prose without sounding like code or a numbered recipe.',
     },
     {
@@ -50,7 +63,7 @@ STYLE_PRESETS = [
         'label': 'Application-Context Task',
         'definition': 'A task framed around a downstream use case such as retrieval, indexing, release, compliance, or corpus construction.',
         'template': 'For {use_case}, process the following data so that {requirement}.',
-        'example': 'For downstream retrieval, process these reports so that disclaimers, table residue, and abnormal long lines are removed, then tell me whether the cleaned report should enter the index.',
+        'example': 'For downstream retrieval, process these reports so that disclaimers, table residue, and abnormal long lines are removed, then keep only reports whose longest remaining line is no more than 200 characters.',
         'guidance': 'Frame the request around a realistic downstream use case such as retrieval, indexing, release, or corpus preparation.',
     },
     {
@@ -58,7 +71,7 @@ STYLE_PRESETS = [
         'label': 'Quality-Control Request',
         'definition': 'A request that sounds like data quality screening, emphasizing retention criteria and rejection conditions.',
         'template': 'Quality-check this sample: {requirement}. Keep it only if it still satisfies the quality condition.',
-        'example': 'Quality-check this page after cleaning away links and noisy HTML. Keep it only if the remaining text is long enough and looks usable as corpus content.',
+        'example': 'Quality-check this page after cleaning away links and noisy HTML. Keep it only if the remaining text has at least 50 words and looks usable as corpus content.',
         'guidance': 'Phrase it like a quality-control request that focuses on what should be retained or rejected and why.',
     },
     {
@@ -66,7 +79,7 @@ STYLE_PRESETS = [
         'label': 'Analyst Handoff',
         'definition': 'A natural teammate-to-teammate handoff written in practical workplace language.',
         'template': 'Could you take this batch and {requirement}?',
-        'example': 'Could you take these LaTeX sources, remove the comments and bibliography, expand the simple macros, and then check whether the resulting source is still worth keeping?',
+        'example': 'Could you take these LaTeX sources, remove the comments and bibliography, expand the simple macros, and then keep only sources whose final text length is at least 1,000 characters?',
         'guidance': 'Phrase it like one teammate handing a dataset-cleaning request to another teammate in normal workplace language.',
     },
     {
@@ -74,7 +87,7 @@ STYLE_PRESETS = [
         'label': 'Concise Brief',
         'definition': 'A short, compact instruction that keeps all necessary behavior while minimizing wording.',
         'template': '{requirement}. Return the final keep/drop decision and cleaned text.',
-        'example': 'Remove private identifiers and unsafe links, normalize the remaining text, then keep only usable sanitized samples.',
+        'example': 'Remove private identifiers and unsafe links, normalize the remaining text, then keep only sanitized samples whose special-character share is below 15%.',
         'guidance': 'Write a compact but complete user request with minimal fluff, while still preserving all important behavior.',
     },
     {
@@ -82,7 +95,7 @@ STYLE_PRESETS = [
         'label': 'Policy-Like Requirement',
         'definition': 'A formal processing requirement that reads like a data handling policy, not code.',
         'template': 'Before this data can be used, it must satisfy the following processing requirement: {requirement}.',
-        'example': 'Before release, the text must not contain emails, IP addresses, file paths, credentials, or long secret-like tokens; after sanitization, retain it only if the result remains usable.',
+        'example': 'Before release, the text must not contain emails, IP addresses, file paths, credentials, or long secret-like tokens; after sanitization, retain it only if the result still has at least 100 words.',
         'guidance': 'Write it like a processing requirement or policy note, but still from a user-facing perspective rather than code.',
     },
     {
@@ -90,7 +103,7 @@ STYLE_PRESETS = [
         'label': 'Workflow Narrative',
         'definition': 'A scenario-style request that first explains the messy data situation and then asks for the needed processing.',
         'template': 'I have {data_situation}. Please {requirement}.',
-        'example': 'I have raw crawl pages with markup, navigation links, and messy whitespace. Please turn them into clean readable text and keep only pages that still look suitable for ingestion.',
+        'example': 'I have raw crawl pages with markup, navigation links, and messy whitespace. Please turn them into clean readable text and keep only pages whose alphanumeric content makes up at least 60% of the final text.',
         'guidance': 'Describe the data situation first, then explain the requested cleanup and filtering behavior as a realistic need.',
     },
     {
@@ -98,7 +111,7 @@ STYLE_PRESETS = [
         'label': 'End-Weighted Instruction',
         'definition': 'The raw data appears before the concrete instruction, so the task request is weighted toward the end of the prompt.',
         'template': '[Data first] ... Above is the raw data. Please apply this processing request: {requirement}.',
-        'example': 'Above is the raw document. Please remove links and contact information, normalize spacing, and then decide whether the cleaned document is still worth keeping.',
+        'example': 'Above is the raw document. Please remove links and contact information, normalize spacing, and then keep the document only if its final text has at least 500 characters.',
         'guidance': 'Write a requirement intended to be placed after the raw data. Make the instruction self-contained and attention-grabbing at the end.',
     },
     {
@@ -106,7 +119,7 @@ STYLE_PRESETS = [
         'label': 'Negative-Constraint Driven',
         'definition': 'A request centered on what must not remain in the output, useful for cleaning and filtering workflows.',
         'template': 'When processing this text, make sure the final result does not contain {noise_list}; also {requirement}.',
-        'example': 'When processing this report, make sure the final result contains no disclaimers, table residue, or abnormal long lines. After that, judge whether it is suitable for retrieval.',
+        'example': 'When processing this report, make sure the final result contains no disclaimers, table residue, or lines longer than 180 characters. After that, judge whether it is suitable for retrieval.',
         'guidance': 'Emphasize unwanted content that should be absent from the final output, while preserving the actual workflow order.',
     },
     {
@@ -114,7 +127,7 @@ STYLE_PRESETS = [
         'label': 'Conversational Cooperative',
         'definition': 'A casual chat-style request that sounds like a real user asking for help, while still being complete enough to execute.',
         'template': 'Hey, could you help me with this text? I need you to {requirement}.',
-        'example': 'Hey, could you help me clean up these source files? I need the LaTeX comments and references removed, the macros expanded, and then a quick call on whether the source is still usable.',
+        'example': 'Hey, could you help me clean up these source files? I need the LaTeX comments and references removed, the macros expanded, and then please keep only sources with at least 300 words left.',
         'guidance': 'Use natural conversational wording, but do not omit key steps, order, or filtering behavior.',
     },
 ]
@@ -132,7 +145,9 @@ Your task:
 - Pretend the user has never seen the code.
 - Never mention operator names, parameter names, class names, file names, YAML, Python, or implementation details.
 - Preserve the exact workflow order and all essential filter semantics.
-- If a numeric threshold is essential, express it naturally as part of the user requirement. Do not mention parameter keys.
+- If a workflow contains any filter/keep-drop step, you MUST express every active threshold naturally and explicitly in the user requirement.
+- Express thresholds as user-style constraints such as "at least 100 characters", "no more than 200 characters per line", "below 15%", or "at least 50 words".
+- Do NOT use parameter names such as min_len, max_len, min_ratio, max_ratio, min_num, max_num, or internal statistic names.
 - Make the prompts stylistically diverse and realistic across different users.
 
 The generated text should be ONLY the user requirement body.
@@ -141,6 +156,7 @@ Do not include raw data placeholders, JSON schema instructions, answer format in
 Hard requirements for every candidate requirement:
 - The requested operation order must be correct.
 - Filtering behavior must be correct.
+- Any numeric threshold or ratio required by a filter must be explicitly grounded in natural language.
 - Do not ask clarifying questions.
 - Do not refer to the benchmark, hidden reference, or code.
 
@@ -303,6 +319,7 @@ def _workflow_bundle(workflow_key: str, rows: list[dict[str, Any]], prompt_cfg: 
                 'kind': kind,
                 'params': filter_params_by_name.get(op_name) if isinstance(filter_params_by_name.get(op_name), dict) else {},
                 'render_hint': op_cfg.get('natural_language_intent') or filter_cfg.get('natural_language_intent'),
+                'threshold_expression_guide': FILTER_THRESHOLD_EXPRESSION_GUIDE.get(op_name) if kind == 'filter' else None,
                 'code_path': str(code_path) if code_path else None,
                 'code_excerpt': _load_text(code_path),
                 'doc_path': str(doc_path) if doc_path else None,
@@ -335,6 +352,7 @@ def _generation_user_prompt(bundle: dict[str, Any]) -> str:
                     f"[Operator] {op['name']} ({op['kind']})",
                     f"Parameters: {params_json}",
                     f"Human hint: {op.get('render_hint') or ''}",
+                    f"Threshold expression guide: {op.get('threshold_expression_guide') or ''}",
                     "[Documentation excerpt]",
                     op['doc_excerpt'] or '(no operator doc excerpt found)',
                     "[Source code]",

@@ -32,6 +32,7 @@ Mandatory keep conditions:
 3. Output contract correctness: the prompt clearly asks for JSON with status and clean_text.
 4. No code leakage: the prompt does not mention operator names, parameter names, YAML, Python, hidden code, or implementation internals.
 5. Wrapper compatibility: the user requirement can be safely combined with the fixed benchmark wrapper that separately supplies raw input text and the JSON output contract.
+6. Threshold grounding: if the workflow has filter parameters, all active numeric thresholds must appear as natural user-facing constraints, not vague words like "long enough" or "too repetitive".
 
 Also score:
 - user_naturalness: does it sound like a plausible user request?
@@ -47,7 +48,8 @@ Return JSON only:
     "order_correct": true,
     "output_contract_correct": true,
     "no_code_leakage": true,
-    "wrapper_compatible": true
+    "wrapper_compatible": true,
+    "thresholds_grounded": true
   },
   "scores": {
     "user_naturalness": 1-5,
@@ -161,6 +163,7 @@ def main() -> None:
                         'output_contract_correct',
                         'no_code_leakage',
                         'wrapper_compatible',
+                        'thresholds_grounded',
                     )
                 )
                 and average_score >= args.min_average_score
