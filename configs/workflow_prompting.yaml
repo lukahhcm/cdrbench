@@ -26,8 +26,8 @@ prompt_styles:
         - KEEP
         - DROP
       keep_behavior: If the sample is kept, return the final refined text in clean_text.
-      drop_behavior: If any filtering step rejects the sample, stop and return DROP with an empty clean_text.
-      json_schema_hint: '{"status":"KEEP","clean_text":"..."} or {"status":"DROP","clean_text":""}'
+      drop_behavior: If any filtering step rejects the sample, stop and return DROP with the current text in clean_text.
+      json_schema_hint: '{"status":"KEEP","clean_text":"..."} or {"status":"DROP","clean_text":"..."}'
 
 domain_contexts:
   web: Clean a web-crawl text sample for corpus ingestion.

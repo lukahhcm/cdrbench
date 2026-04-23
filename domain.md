@@ -15,10 +15,12 @@ All benchmark tasks use the same output contract:
 or:
 
 ```json
-{"status": "DROP", "clean_text": ""}
+{"status": "DROP", "clean_text": "..."}
 ```
 
 This protocol lets the benchmark compare domains, workflow types, and model families under a single evaluation interface.
+
+For `DROP`, `clean_text` contains the current text at the rejection point rather than being forced to empty. This keeps cleaning behavior observable even when the final status is `DROP`.
 
 The model-facing task should be expressed as a natural-language data-refinement request. Operator names, Data-Juicer configs, and internal thresholds are implementation metadata unless the prompt generator intentionally verbalizes them in a user-like way.
 

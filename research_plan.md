@@ -15,8 +15,10 @@ The core task is not workflow generation, tool calling, code generation, or user
 or:
 
 ```json
-{"status": "DROP", "clean_text": ""}
+{"status": "DROP", "clean_text": "..."}
 ```
+
+For `DROP`, `clean_text` is the current text at the point where the deterministic workflow rejects the sample. For `filter-then-clean`, this is usually the raw input text; for `clean-then-filter`, it is the cleaned text that failed the filter.
 
 The hidden reference is produced by deterministic Data-Juicer-backed operators. Final prompts should describe the user need in natural language rather than exposing operator names.
 

@@ -179,10 +179,10 @@ OUTPUT_CONTRACT = """Output format:
 Return exactly one valid JSON object and nothing else.
 Use one of these two forms:
 {"status":"KEEP","clean_text":"..."}
-{"status":"DROP","clean_text":""}
+{"status":"DROP","clean_text":"..."}
 
 Rules:
-- If the requested filtering/quality check rejects the current text, return DROP and set clean_text to an empty string.
+- If the requested filtering/quality check rejects the current text, return DROP and set clean_text to the current text at the point where it was rejected.
 - If the sample is kept, return KEEP and put the final refined text in clean_text.
 - Do not include Markdown fences, comments, explanations, or extra keys."""
 
@@ -462,7 +462,7 @@ def _prompt_variant(candidate: dict[str, Any], input_text: str) -> dict[str, Any
         ],
         'expected_response_format': {
             'type': 'json_object',
-            'schema_hint': '{"status":"KEEP","clean_text":"..."} or {"status":"DROP","clean_text":""}',
+            'schema_hint': '{"status":"KEEP","clean_text":"..."} or {"status":"DROP","clean_text":"..."}',
         },
     }
 

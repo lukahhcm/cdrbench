@@ -298,7 +298,7 @@ def _execute_workflow(
         if not evaluation['keep']:
             return {
                 'reference_status': 'DROP',
-                'reference_text': '',
+                'reference_text': text,
                 'intermediate_text_at_drop': text,
                 'trace': trace,
             }
