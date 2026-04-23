@@ -5,8 +5,6 @@ import os
 import re
 from typing import Any
 
-from openai import OpenAI
-
 
 DEFAULT_BASE_URL = "http://123.57.212.178:3333/v1"
 DEFAULT_MODEL = "gpt-4.1-2025-04-14"
@@ -27,13 +25,20 @@ def resolve_model(explicit: str | None = None) -> str:
     return explicit or os.getenv("OPENAI_MODEL") or os.getenv("LLM_MODEL") or DEFAULT_MODEL
 
 
-def build_client(api_key: str | None = None, base_url: str | None = None) -> OpenAI:
+def build_client(api_key: str | None = None, base_url: str | None = None) -> Any:
+    try:
+        from openai import OpenAI
+    except ImportError as exc:
+        raise RuntimeError(
+            "The openai package is required for LLM-backed prompt generation/judging. "
+            "Install project dependencies with `python -m pip install -e .`."
+        ) from exc
     return OpenAI(api_key=resolve_api_key(api_key), base_url=resolve_base_url(base_url))
 
 
 def chat_completion(
     *,
-    client: OpenAI,
+    client: Any,
     model: str,
     system_prompt: str,
     user_prompt: str,

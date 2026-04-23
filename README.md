@@ -275,22 +275,39 @@ Track files keep the original benchmark rows and attach:
 
 - `workflow_prompt_key`
 - `prompt_candidate_count`
+- `prompt_variants`
 
-`workflow_prompt_library.jsonl` stores the actual prompt candidates for each unique workflow. The generator reads operator source code, operator docs, workflow order, and filter params, then asks an external LLM to produce multiple stylistically diverse user-facing requests for the same workflow.
+`workflow_prompt_library.jsonl` stores prompt requirement candidates for each unique workflow. The generator reads operator source code, operator docs, workflow order, and filter params, then asks an external LLM to produce multiple stylistically diverse user-facing requirements for the same workflow.
 
-The default generation flow hides operator names and parameter names from the final prompt, while still preserving:
+The actual model prompt is assembled by code:
+
+```text
+{{LLM-generated user requirement}}
+
+{{fixed CDR-Bench output contract}}
+
+Raw input text:
+<<<CDR_INPUT
+{{input_text}}
+CDR_INPUT>>>
+```
+
+This means natural-language diversity comes from the requirement body, while the output protocol remains fixed across all styles.
+
+The default generation flow hides operator names and parameter names from the user-facing requirement, while still preserving:
 
 - `data/processed/workflow_library/<domain>/workflow_library.yaml`
 - `configs/workflow_prompting.yaml`
 - `data/benchmark/*.jsonl`
 
-The generated prompt candidates should preserve:
+The generated requirement candidates should preserve:
 
 - the user-facing refinement goal
 - the required order when order matters
-- the output contract: `status` and `clean_text`
 - natural threshold semantics when needed
 - stylistic diversity across different users
+
+Current style pool includes imperative checklist, goal-oriented description, application-context task, quality-control request, analyst handoff, concise brief, policy-like requirement, workflow narrative, end-weighted instruction, negative-constraint driven, and conversational cooperative styles.
 
 By default, prompt generation skips workflows containing `flagged_words_filter` and `stopwords_filter`.
 

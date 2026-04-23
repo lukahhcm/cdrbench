@@ -31,43 +31,91 @@ SKIPPED_OPERATORS = {'flagged_words_filter', 'stopwords_filter'}
 STYLE_PRESETS = [
     {
         'style_id': 'imperative_checklist',
-        'label': '指令式',
+        'label': 'Imperative Checklist',
+        'definition': 'A direct command that lists the required operations explicitly and in order.',
+        'template': 'Please perform the following operations on the text: {requirement}.',
+        'example': 'Please clean this web page by removing the HTML, stripping links, normalizing the whitespace, and then deciding whether the result is useful enough to keep.',
         'guidance': 'Write a direct step-by-step request with explicit sequencing, like a user telling an assistant exactly what to do.',
     },
     {
         'style_id': 'goal_oriented',
-        'label': '描述式',
+        'label': 'Goal-Oriented Description',
+        'definition': 'A prose description that emphasizes the intended final state rather than a numbered procedure.',
+        'template': 'The goal is to make the data suitable for {use_case}; it should end up with {requirement}.',
+        'example': 'The goal is to make these help documents clean enough for a support index, with links removed, repeated template sentences cleaned up, and spacing made consistent before deciding whether each document is worth retaining.',
         'guidance': 'Describe the goal and desired cleanup outcome in fluent prose without sounding like code or a numbered recipe.',
     },
     {
         'style_id': 'application_context',
-        'label': '任务式',
+        'label': 'Application-Context Task',
+        'definition': 'A task framed around a downstream use case such as retrieval, indexing, release, compliance, or corpus construction.',
+        'template': 'For {use_case}, process the following data so that {requirement}.',
+        'example': 'For downstream retrieval, process these reports so that disclaimers, table residue, and abnormal long lines are removed, then tell me whether the cleaned report should enter the index.',
         'guidance': 'Frame the request around a realistic downstream use case such as retrieval, indexing, release, or corpus preparation.',
     },
     {
         'style_id': 'qa_request',
-        'label': '质检式',
+        'label': 'Quality-Control Request',
+        'definition': 'A request that sounds like data quality screening, emphasizing retention criteria and rejection conditions.',
+        'template': 'Quality-check this sample: {requirement}. Keep it only if it still satisfies the quality condition.',
+        'example': 'Quality-check this page after cleaning away links and noisy HTML. Keep it only if the remaining text is long enough and looks usable as corpus content.',
         'guidance': 'Phrase it like a quality-control request that focuses on what should be retained or rejected and why.',
     },
     {
         'style_id': 'analyst_handoff',
-        'label': '交接式',
+        'label': 'Analyst Handoff',
+        'definition': 'A natural teammate-to-teammate handoff written in practical workplace language.',
+        'template': 'Could you take this batch and {requirement}?',
+        'example': 'Could you take these LaTeX sources, remove the comments and bibliography, expand the simple macros, and then check whether the resulting source is still worth keeping?',
         'guidance': 'Phrase it like one teammate handing a dataset-cleaning request to another teammate in normal workplace language.',
     },
     {
         'style_id': 'concise_brief',
-        'label': '简洁式',
+        'label': 'Concise Brief',
+        'definition': 'A short, compact instruction that keeps all necessary behavior while minimizing wording.',
+        'template': '{requirement}. Return the final keep/drop decision and cleaned text.',
+        'example': 'Remove private identifiers and unsafe links, normalize the remaining text, then keep only usable sanitized samples.',
         'guidance': 'Write a compact but complete user request with minimal fluff, while still preserving all important behavior.',
     },
     {
         'style_id': 'policy_like',
-        'label': '规范式',
+        'label': 'Policy-Like Requirement',
+        'definition': 'A formal processing requirement that reads like a data handling policy, not code.',
+        'template': 'Before this data can be used, it must satisfy the following processing requirement: {requirement}.',
+        'example': 'Before release, the text must not contain emails, IP addresses, file paths, credentials, or long secret-like tokens; after sanitization, retain it only if the result remains usable.',
         'guidance': 'Write it like a processing requirement or policy note, but still from a user-facing perspective rather than code.',
     },
     {
         'style_id': 'workflow_narrative',
-        'label': '场景式',
+        'label': 'Workflow Narrative',
+        'definition': 'A scenario-style request that first explains the messy data situation and then asks for the needed processing.',
+        'template': 'I have {data_situation}. Please {requirement}.',
+        'example': 'I have raw crawl pages with markup, navigation links, and messy whitespace. Please turn them into clean readable text and keep only pages that still look suitable for ingestion.',
         'guidance': 'Describe the data situation first, then explain the requested cleanup and filtering behavior as a realistic need.',
+    },
+    {
+        'style_id': 'end_weighted_instruction',
+        'label': 'End-Weighted Instruction',
+        'definition': 'The raw data appears before the concrete instruction, so the task request is weighted toward the end of the prompt.',
+        'template': '[Data first] ... Above is the raw data. Please apply this processing request: {requirement}.',
+        'example': 'Above is the raw document. Please remove links and contact information, normalize spacing, and then decide whether the cleaned document is still worth keeping.',
+        'guidance': 'Write a requirement intended to be placed after the raw data. Make the instruction self-contained and attention-grabbing at the end.',
+    },
+    {
+        'style_id': 'negative_constraint_driven',
+        'label': 'Negative-Constraint Driven',
+        'definition': 'A request centered on what must not remain in the output, useful for cleaning and filtering workflows.',
+        'template': 'When processing this text, make sure the final result does not contain {noise_list}; also {requirement}.',
+        'example': 'When processing this report, make sure the final result contains no disclaimers, table residue, or abnormal long lines. After that, judge whether it is suitable for retrieval.',
+        'guidance': 'Emphasize unwanted content that should be absent from the final output, while preserving the actual workflow order.',
+    },
+    {
+        'style_id': 'conversational_cooperative',
+        'label': 'Conversational Cooperative',
+        'definition': 'A casual chat-style request that sounds like a real user asking for help, while still being complete enough to execute.',
+        'template': 'Hey, could you help me with this text? I need you to {requirement}.',
+        'example': 'Hey, could you help me clean up these source files? I need the LaTeX comments and references removed, the macros expanded, and then a quick call on whether the source is still usable.',
+        'guidance': 'Use natural conversational wording, but do not omit key steps, order, or filtering behavior.',
     },
 ]
 
@@ -87,10 +135,12 @@ Your task:
 - If a numeric threshold is essential, express it naturally as part of the user requirement. Do not mention parameter keys.
 - Make the prompts stylistically diverse and realistic across different users.
 
-Hard requirements for every candidate:
+The generated text should be ONLY the user requirement body.
+Do not include raw data placeholders, JSON schema instructions, answer format instructions, or system/developer wording. The benchmark wrapper will add those later.
+
+Hard requirements for every candidate requirement:
 - The requested operation order must be correct.
 - Filtering behavior must be correct.
-- The final output contract must be explicit: return only JSON with status and clean_text.
 - Do not ask clarifying questions.
 - Do not refer to the benchmark, hidden reference, or code.
 
@@ -100,12 +150,25 @@ Return JSON only, with this exact schema:
     {
       "style_id": "...",
       "style_label": "...",
-      "user_request": "...",
+      "user_requirement": "...",
       "style_notes": "short note on why this wording is stylistically distinct"
     }
   ]
 }
 """
+
+SYSTEM_PROMPT = """You are a careful data refinement engine. Follow the user's data-refinement request exactly and in order. Return only the required JSON object. Do not explain your reasoning."""
+
+OUTPUT_CONTRACT = """Output format:
+Return exactly one valid JSON object and nothing else.
+Use one of these two forms:
+{"status":"KEEP","clean_text":"..."}
+{"status":"DROP","clean_text":""}
+
+Rules:
+- If the requested filtering/quality check rejects the current text, return DROP and set clean_text to an empty string.
+- If the sample is kept, return KEEP and put the final refined text in clean_text.
+- Do not include Markdown fences, comments, explanations, or extra keys."""
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -212,6 +275,17 @@ def _style_subset(count: int) -> list[dict[str, str]]:
     return STYLE_PRESETS[:count]
 
 
+def _format_style_for_llm(style: dict[str, str]) -> str:
+    return (
+        f"- style_id: {style['style_id']}\n"
+        f"  label: {style['label']}\n"
+        f"  definition: {style['definition']}\n"
+        f"  template: {style['template']}\n"
+        f"  example: {style['example']}\n"
+        f"  generation guidance: {style['guidance']}"
+    )
+
+
 def _workflow_bundle(workflow_key: str, rows: list[dict[str, Any]], prompt_cfg: dict[str, Any], variants_per_workflow: int) -> dict[str, Any]:
     row = rows[0]
     operator_sequence = list(row.get('operator_sequence') or ([row['operator']] if row.get('operator') else []))
@@ -251,10 +325,7 @@ def _workflow_bundle(workflow_key: str, rows: list[dict[str, Any]], prompt_cfg: 
 
 
 def _generation_user_prompt(bundle: dict[str, Any]) -> str:
-    style_lines = [
-        f"- {style['style_id']} ({style['style_label']}): {style['guidance']}"
-        for style in bundle['style_requests']
-    ]
+    style_lines = [_format_style_for_llm(style) for style in bundle['style_requests']]
     op_blocks = []
     for op in bundle['operators']:
         params_json = json.dumps(op['params'], ensure_ascii=False, sort_keys=True)
@@ -280,9 +351,11 @@ def _generation_user_prompt(bundle: dict[str, Any]) -> str:
         f"Internal operator sequence: {' -> '.join(bundle['operator_sequence'])}\n"
         f"Filter params by name: {json.dumps(bundle['filter_params_by_name'], ensure_ascii=False, sort_keys=True)}\n"
         f"Threshold meta: {json.dumps(bundle['threshold_meta'], ensure_ascii=False, sort_keys=True)}\n\n"
-        "Generate one candidate prompt for each requested style below:\n"
+        "Generate one candidate user requirement body for each requested style below.\n"
+        "Use the style definition, template, and example only as guidance; do not copy the example literally unless the workflow matches it.\n\n"
         f"{chr(10).join(style_lines)}\n\n"
-        "Important: act as if the user has never seen code. Do not mention operator names, parameter names, class names, YAML, file paths, or implementation-specific terms.\n\n"
+        "Important: act as if the user has never seen code. Do not mention operator names, parameter names, class names, YAML, file paths, JSON schema, or implementation-specific terms.\n"
+        "Return only the user requirement body for each candidate. The final benchmark prompt wrapper and output format will be added by code.\n\n"
         "Operator evidence:\n\n"
         f"{chr(10).join(op_blocks)}"
     )
@@ -332,19 +405,48 @@ def _call_llm_for_candidates(
         if not isinstance(item, dict):
             continue
         style_id = str(item.get('style_id') or '')
-        user_request = str(item.get('user_request') or '').strip()
-        if not style_id or not user_request or user_request in seen:
+        user_requirement = str(item.get('user_requirement') or item.get('user_request') or '').strip()
+        if not style_id or not user_requirement or user_requirement in seen:
             continue
-        seen.add(user_request)
+        seen.add(user_requirement)
         candidates.append(
             {
                 'style_id': style_id,
                 'style_label': str(item.get('style_label') or style_id),
                 'style_notes': str(item.get('style_notes') or ''),
-                'user_request': user_request,
+                'user_requirement': user_requirement,
             }
         )
     return candidates
+
+
+def _build_user_prompt(candidate: dict[str, Any], input_text: str) -> str:
+    return (
+        f"{candidate['user_requirement']}\n\n"
+        f"{OUTPUT_CONTRACT}\n\n"
+        "Raw input text:\n"
+        "<<<CDR_INPUT\n"
+        f"{input_text}\n"
+        "CDR_INPUT>>>"
+    )
+
+
+def _prompt_variant(candidate: dict[str, Any], input_text: str) -> dict[str, Any]:
+    user_prompt = _build_user_prompt(candidate, input_text)
+    return {
+        **candidate,
+        'user_prompt': user_prompt,
+        'system_prompt': SYSTEM_PROMPT,
+        'prompt': SYSTEM_PROMPT + '\n\n' + user_prompt,
+        'messages': [
+            {'role': 'system', 'content': SYSTEM_PROMPT},
+            {'role': 'user', 'content': user_prompt},
+        ],
+        'expected_response_format': {
+            'type': 'json_object',
+            'schema_hint': '{"status":"KEEP","clean_text":"..."} or {"status":"DROP","clean_text":""}',
+        },
+    }
 
 
 def _template_candidates(bundle: dict[str, Any], prompt_cfg: dict[str, Any]) -> list[dict[str, Any]]:
@@ -363,19 +465,19 @@ def _template_candidates(bundle: dict[str, Any], prompt_cfg: dict[str, Any]) -> 
     candidates = []
     for style in bundle['style_requests']:
         if style['style_id'] == 'imperative_checklist':
-            text = f'{scenario} Please execute these steps in order: {joined}. Return only JSON with status and clean_text.'
+            text = f'{scenario} Please execute these steps in order: {joined}.'
         elif style['style_id'] == 'goal_oriented':
-            text = f'The goal is to refine this text for {bundle.get("domain")} use. {joined}. Return only JSON with status and clean_text.'
+            text = f'The goal is to refine this text for {bundle.get("domain")} use. {joined}.'
         elif style['style_id'] == 'application_context':
-            text = f'For downstream processing, please clean this data carefully. {joined}. Return only JSON with status and clean_text.'
+            text = f'For downstream processing, please clean this data carefully. {joined}.'
         else:
-            text = f'{scenario} {joined}. Return only JSON with status and clean_text.'
+            text = f'{scenario} {joined}.'
         candidates.append(
             {
                 'style_id': style['style_id'],
                 'style_label': style['label'],
                 'style_notes': 'template fallback',
-                'user_request': text,
+                'user_requirement': text,
             }
         )
     return candidates
@@ -463,11 +565,13 @@ def main() -> None:
             prompt_library_rows.append(library_row)
 
             for row in workflow_rows:
+                prompt_variants = [_prompt_variant(candidate, str(row.get('input_text', ''))) for candidate in candidates]
                 track_output_rows.append(
                     {
                         **row,
                         'workflow_prompt_key': workflow_key,
                         'prompt_candidate_count': len(candidates),
+                        'prompt_variants': prompt_variants,
                     }
                 )
 

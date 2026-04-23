@@ -31,6 +31,7 @@ Mandatory keep conditions:
 2. Order correctness: the requested order matches the internal workflow order.
 3. Output contract correctness: the prompt clearly asks for JSON with status and clean_text.
 4. No code leakage: the prompt does not mention operator names, parameter names, YAML, Python, hidden code, or implementation internals.
+5. Wrapper compatibility: the user requirement can be safely combined with the fixed benchmark wrapper that separately supplies raw input text and the JSON output contract.
 
 Also score:
 - user_naturalness: does it sound like a plausible user request?
@@ -45,7 +46,8 @@ Return JSON only:
     "functional_equivalence": true,
     "order_correct": true,
     "output_contract_correct": true,
-    "no_code_leakage": true
+    "no_code_leakage": true,
+    "wrapper_compatible": true
   },
   "scores": {
     "user_naturalness": 1-5,
@@ -104,7 +106,8 @@ def _judge_user_prompt(entry: dict[str, Any], candidate: dict[str, Any], *, clie
         f"Filter params by name: {json.dumps(entry.get('filter_params_by_name') or {}, ensure_ascii=False, sort_keys=True)}\n"
         f"Threshold meta: {json.dumps(entry.get('threshold_meta') or {}, ensure_ascii=False, sort_keys=True)}\n\n"
         f"Candidate style: {candidate.get('style_id')} / {candidate.get('style_label')}\n"
-        f"Candidate prompt:\n{candidate.get('user_request')}\n\n"
+        f"Candidate user requirement body:\n{candidate.get('user_requirement') or candidate.get('user_request')}\n\n"
+        "Fixed wrapper that will be appended by code: raw input text plus a JSON-only output contract with status and clean_text.\n\n"
         "Operator evidence:\n"
         f"{chr(10).join(operator_blocks)}"
     )
@@ -150,7 +153,16 @@ def main() -> None:
             scores = verdict.get('scores') if isinstance(verdict.get('scores'), dict) else {}
             average_score = sum(float(scores.get(k, 0)) for k in ('user_naturalness', 'threshold_grounding', 'clarity', 'format_consistency')) / 4.0
             keep = (
-                all(bool(must_pass.get(key)) for key in ('functional_equivalence', 'order_correct', 'output_contract_correct', 'no_code_leakage'))
+                all(
+                    bool(must_pass.get(key))
+                    for key in (
+                        'functional_equivalence',
+                        'order_correct',
+                        'output_contract_correct',
+                        'no_code_leakage',
+                        'wrapper_compatible',
+                    )
+                )
                 and average_score >= args.min_average_score
                 and str(verdict.get('verdict')).lower() == 'keep'
             )
