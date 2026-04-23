@@ -233,13 +233,13 @@ Main benchmark:
 
 - `main.jsonl` contains one task per row.
 - `workflow_type` tells whether the row is `clean-only`, `filter-then-clean`, or `clean-then-filter`.
-- `reference_status` and `reference_clean_text` are the deterministic GT.
+- `reference_status` and `reference_text` are the deterministic GT.
 - Workflow length can be recovered from the operator sequence fields in each row.
 
 Order-sensitivity benchmark:
 
 - `order_sensitivity.jsonl` contains `front / middle / end` variant rows.
-- Rows with the same `order_group_id` belong together.
+- Rows with the same `order_group_instance_id` belong together.
 - Group success requires all three slots to be correct.
 
 Atomic calibration:
@@ -248,21 +248,55 @@ Atomic calibration:
 - `source_domain` is diagnostic only.
 - Use it to estimate atomic operator difficulty and compositional gaps.
 
-## 9. Prompt Generation
+## 9. Generate Model Prompts
 
-Prompt generation is intentionally separate from GT construction.
+Prompt generation is intentionally separate from GT construction, so prompt wording can be revised without rerunning Data-Juicer references.
 
-The final model prompt should be a natural-language user request, not an operator list. Use these files as metadata sources:
+Generate prompt JSONL files:
+
+```bash
+.venv-ops/bin/python scripts/prepare_data/generate_benchmark_prompts.py \
+  --benchmark-dir data/benchmark \
+  --output-dir data/benchmark_prompts \
+  --prompt-config configs/workflow_prompting.yaml \
+  --prompt-style user_natural_v1
+```
+
+Outputs:
+
+- `data/benchmark_prompts/main.jsonl`
+- `data/benchmark_prompts/order_sensitivity.jsonl`
+- `data/benchmark_prompts/atomic_ops.jsonl`
+- `data/benchmark_prompts/prompt_generation_summary.jsonl`
+
+Each row keeps the original benchmark fields and adds:
+
+- `system_prompt`
+- `user_prompt`
+- `prompt`
+- `messages`
+- `expected_response_format`
+
+The default prompt is a natural-language user request, not an operator list. It uses these metadata sources:
 
 - `data/processed/workflow_library/<domain>/workflow_library.yaml`
 - `configs/workflow_prompting.yaml`
 - `data/benchmark/*.jsonl`
 
-The prompt should state:
+The prompt states:
 
 - the user-facing refinement goal
 - the required order when order matters
 - the output contract: `status` and `clean_text`
+
+For debugging only, you can append hidden operator names to each step:
+
+```bash
+.venv-ops/bin/python scripts/prepare_data/generate_benchmark_prompts.py \
+  --include-internal-operator-names
+```
+
+Do not use that debug mode for headline model evaluation.
 
 ## 10. Troubleshooting Data-Juicer Imports
 
