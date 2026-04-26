@@ -255,6 +255,34 @@ Atomic calibration:
 - `source_domain` is diagnostic only.
 - Use it to estimate atomic operator difficulty and compositional gaps.
 
+Benchmark composition visualization:
+
+If you want a quick paper-style overview of what the benchmark is made of, generate the composition plots:
+
+```bash
+.venv-ops/bin/python scripts/prepare_data/plot_benchmark_composition.py \
+  --benchmark-dir data/benchmark \
+  --workflow-library-dir data/processed/workflow_library \
+  --output-dir data/paper_stats/plots
+```
+
+Outputs:
+
+- `data/paper_stats/plots/benchmark_composition_overview.png`
+- `data/paper_stats/plots/benchmark_composition_overview.pdf`
+- `data/paper_stats/plots/benchmark_composition_summary.json`
+
+The overview figure shows:
+
+- workflow-library domain composition
+- main-track domain composition
+- main-track workflow-type composition
+- main-variant `kept / skipped` status composition
+- order-sensitive group composition by domain
+- order-family `kept / skipped` status composition
+- atomic-track source-domain composition
+- atomic-operator `kept / skipped` status composition
+
 ## 9. Generate Model Prompts
 
 Prompt generation is intentionally separate from GT construction, so prompt wording can be revised without rerunning Data-Juicer references.
