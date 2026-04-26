@@ -287,109 +287,68 @@ The overview figure shows:
 
 Prompt generation is intentionally separate from GT construction, so prompt wording can be revised without rerunning Data-Juicer references.
 
-The prompt pipeline now has two stages:
+Use the bundled orchestration script to run the full prompt pipeline for all three tracks in order:
 
-1. Build a workflow-level prompt library:
-   Generate multiple prompt candidates for each style, judge them immediately, and keep only the accepted prompts in the workflow pool.
-2. Build eval-ready prompt tracks:
-   For each benchmark sample, deterministically sample `3` distinct styles from the accepted workflow pool.
+- `atomic_ops`
+- `main`
+- `order_sensitivity`
 
-Atomic preview first, using the merged generate+judge stage:
+The script performs three steps for each track:
+
+1. generate workflow-level prompt candidates
+2. judge and keep only accepted prompts
+3. combine the accepted prompt pool with benchmark rows to build eval-ready files
+
+Default run:
 
 ```bash
-PYTHONPATH=src .venv-ops/bin/python -m cdrbench.prompting.generate_workflow_prompt_library \
-  --benchmark-dir data/benchmark \
-  --output-dir data/benchmark_prompts_atomic_preview \
-  --prompt-config configs/workflow_prompting.yaml \
-  --prompt-source llm \
-  --tracks atomic_ops \
-  --variants-per-workflow 11 \
-  --candidates-per-style 3 \
-  --cache-path data/benchmark_prompts_atomic_preview/workflow_prompt_library_cache.jsonl \
-  --resume
+./scripts/run_prompt_pipeline_all_tracks.sh
 ```
 
-Then build the eval-ready atomic prompt track from the accepted pool:
+This default uses the repo's current LLM defaults:
+
+- base URL: `http://123.57.212.178:3333/v1`
+- model: `gpt-5.4`
+- workflow-level resume cache: enabled
+
+Set an API key before running:
 
 ```bash
-PYTHONPATH=src .venv-ops/bin/python -m cdrbench.prompting.build_eval_prompt_tracks \
-  --benchmark-dir data/benchmark \
-  --prompt-library data/benchmark_prompts_atomic_preview/workflow_prompt_library.jsonl \
-  --output-dir data/benchmark_prompts_atomic_preview/eval \
-  --tracks atomic_ops \
-  --prompt-variants-per-sample 3 \
-  --prompt-sampling-seed 0 \
-  --min-prompt-variants-per-sample 3
+export OPENAI_API_KEY="your_key"
 ```
 
-If the atomic prompts look good, continue with the main and order-sensitivity tracks:
+If needed, you can still override the model endpoint explicitly:
 
 ```bash
-PYTHONPATH=src .venv-ops/bin/python -m cdrbench.prompting.generate_workflow_prompt_library \
-  --benchmark-dir data/benchmark \
-  --output-dir data/benchmark_prompts \
-  --prompt-config configs/workflow_prompting.yaml \
-  --prompt-source llm \
-  --tracks main order_sensitivity \
-  --variants-per-workflow 11 \
-  --candidates-per-style 3 \
-  --cache-path data/benchmark_prompts/workflow_prompt_library_cache.jsonl \
-  --resume
+./scripts/run_prompt_pipeline_all_tracks.sh \
+  --base-url http://123.57.212.178:3333/v1 \
+  --model gpt-5.4 \
+  --judge-base-url http://123.57.212.178:3333/v1 \
+  --judge-model gpt-5.4
 ```
 
+Useful overrides:
+
 ```bash
-PYTHONPATH=src .venv-ops/bin/python -m cdrbench.prompting.build_eval_prompt_tracks \
-  --benchmark-dir data/benchmark \
-  --prompt-library data/benchmark_prompts/workflow_prompt_library.jsonl \
-  --output-dir data/benchmark_prompts/eval \
-  --tracks main order_sensitivity \
-  --prompt-variants-per-sample 3 \
-  --prompt-sampling-seed 0 \
-  --min-prompt-variants-per-sample 3
+./scripts/run_prompt_pipeline_all_tracks.sh --tracks atomic_ops
+./scripts/run_prompt_pipeline_all_tracks.sh --prompt-source template
+./scripts/run_prompt_pipeline_all_tracks.sh --no-resume
 ```
 
 Outputs:
 
-- `data/benchmark_prompts/workflow_prompt_library.jsonl`
-- `data/benchmark_prompts/prompt_generation_summary.jsonl`
-- `data/benchmark_prompts/eval/main.jsonl`
-- `data/benchmark_prompts/eval/order_sensitivity.jsonl`
-- `data/benchmark_prompts/eval/atomic_ops.jsonl`
-- `data/benchmark_prompts/eval/prompt_eval_build_summary.jsonl`
-
-`workflow_prompt_library.jsonl` stores the accepted workflow-level prompt pool. Each row corresponds to one unique workflow signature and includes:
-
-- `workflow_prompt_key`
-- `benchmark_track`
-- `domain`
-- `workflow_type`
-- `order_slot`
-- `operator_sequence`
-- `filter_params_by_name`
-- `threshold_meta`
-- `requested_style_count`
-- `candidates_per_style`
-- `generated_candidate_count`
-- `accepted_candidate_count`
-- `accepted_style_count`
-- `candidates`
-
-Track files are eval-ready sample files. They keep only the benchmark fields needed for evaluation plus:
-
-- `workflow_prompt_key`
-- `prompt_candidate_pool_count`
-- `prompt_variant_count`
-- `prompt_sampling_policy`
-- `prompt_sampling_seed`
-- `prompt_variants`
-
-Each `prompt_variants` entry is lightweight and contains only:
-
-- `style_id`
-- `style_label`
-- `user_requirement`
-
-This means the workflow library keeps only judge-passed prompts, while each benchmark sample keeps a fixed deterministic subset of `3` styles for direct evaluation.
+- `data/benchmark_prompts/atomic_ops/workflow_prompt_library.jsonl`
+- `data/benchmark_prompts/atomic_ops/prompt_generation_summary.jsonl`
+- `data/benchmark_prompts/atomic_ops/eval/atomic_ops.jsonl`
+- `data/benchmark_prompts/atomic_ops/eval/prompt_eval_build_summary.jsonl`
+- `data/benchmark_prompts/main/workflow_prompt_library.jsonl`
+- `data/benchmark_prompts/main/prompt_generation_summary.jsonl`
+- `data/benchmark_prompts/main/eval/main.jsonl`
+- `data/benchmark_prompts/main/eval/prompt_eval_build_summary.jsonl`
+- `data/benchmark_prompts/order_sensitivity/workflow_prompt_library.jsonl`
+- `data/benchmark_prompts/order_sensitivity/prompt_generation_summary.jsonl`
+- `data/benchmark_prompts/order_sensitivity/eval/order_sensitivity.jsonl`
+- `data/benchmark_prompts/order_sensitivity/eval/prompt_eval_build_summary.jsonl`
 
 The actual model prompt should be assembled by evaluation code:
 
@@ -426,14 +385,10 @@ By default, prompt generation skips workflows containing `flagged_words_filter` 
 Notes:
 
 - Prompt generation is grouped by workflow signature rather than by individual sample, so all samples sharing the same workflow reuse the same accepted prompt pool.
-- `--variants-per-workflow` controls how many style presets to request for each workflow.
-- `--candidates-per-style` controls how many prompt candidates to generate for each style before judging.
-- `generate_workflow_prompt_library.py` runs generation and judging in one pass, and stores only the accepted prompts in `workflow_prompt_library.jsonl`.
-- `build_eval_prompt_tracks.py` deterministically samples distinct styles from the accepted workflow pool for each benchmark sample.
-- `--prompt-sampling-seed` fixes the deterministic sample of styles used for each benchmark sample, so repeated evaluations stay reproducible.
-- `--min-prompt-variants-per-sample 3` ensures the final eval tracks only keep samples whose workflow prompt pool can supply at least `3` distinct accepted styles.
-- `--resume` reuses the workflow-level cache at `--cache-path`, so an interrupted workflow-library run can continue without re-calling the LLM for finished workflows.
-- clarity and format consistency
+- Each sample keeps a deterministic subset of `3` accepted prompt styles for direct evaluation.
+- `prompt_generation_summary.jsonl` is the check file for accepted prompt-pool coverage.
+- `prompt_eval_build_summary.jsonl` is the check file for final eval-row coverage.
+- `--resume` reuses the workflow-level cache so interrupted runs can continue without starting from scratch.
 
 ## 10. Troubleshooting Data-Juicer Imports
 
