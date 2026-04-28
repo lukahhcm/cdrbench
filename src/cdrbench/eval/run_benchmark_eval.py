@@ -669,6 +669,11 @@ def _predict(args: argparse.Namespace) -> None:
     started = time.time()
     total_rows = len(rows)
     new_count = 0
+    print(
+        f'start predict track={_track_name_from_path(eval_path)} model={model} '
+        f'num_rows={total_rows} progress_every={args.progress_every} resume={bool(args.resume)}',
+        flush=True,
+    )
     for index, row in enumerate(rows, start=1):
         instance_id = str(row.get('instance_id') or '')
         selected_prompt_variant_indices = _parse_prompt_variant_indices(
@@ -847,6 +852,11 @@ def _score(args: argparse.Namespace) -> None:
     started = time.time()
     if args.benchmark_path:
         benchmark_rows = _read_jsonl((ROOT / args.benchmark_path).resolve())
+        print(
+            f'start score track={_track_name_from_path((ROOT / args.benchmark_path).resolve())} '
+            f'num_instances={len(benchmark_rows)} progress_every={args.progress_every} resume={bool(args.resume)}',
+            flush=True,
+        )
         benchmark_map = {str(row.get('instance_id') or ''): row for row in benchmark_rows if row.get('instance_id')}
         unexpected_prediction_count = 0
         seen_prediction_ids = set()
@@ -938,6 +948,11 @@ def _score(args: argparse.Namespace) -> None:
         summary['unexpected_prediction_count'] = unexpected_prediction_count
     else:
         total_rows = len(prediction_rows)
+        print(
+            f'start score track={_track_name_from_path(predictions_path)} '
+            f'num_instances={total_rows} progress_every={args.progress_every} resume={bool(args.resume)}',
+            flush=True,
+        )
         for index, prediction_row in enumerate(prediction_rows, start=1):
             instance_id = str(prediction_row.get(args.prediction_instance_field) or prediction_row.get('instance_id') or '')
             if args.resume and instance_id in existing_instance_rows_by_id:
