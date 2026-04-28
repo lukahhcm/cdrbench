@@ -534,37 +534,70 @@ This supports the claim that CDR-Bench measures compositional execution, not onl
 
 ## 11. Metrics
 
-Main metrics:
+We report two primary instance-level metrics and one order-sensitive group metric.
 
-- `Workflow Success`
-- `Status Accuracy`
-- `CleanText Exact Match`
-- `CleanText Canonical Match`
+Primary metrics:
 
-Definitions:
+- `Recipe Success (RS)`
+- `Refinement Gain (RG)`
+- `Order-Consistent Success (OCS)` for the order-sensitivity track
+
+### 11.1 Recipe Success
+
+`RS` measures exact recipe execution for one prompt variant:
 
 ```text
 status_match = predicted_status == reference_status
-text_match = canonical(predicted_clean_text) == canonical(reference_text)
-workflow_success = status_match AND text_match
+text_exact_match = predicted_clean_text == reference_text
+recipe_success = status_match AND text_exact_match
 ```
 
+This is the main exact-match metric. It does not canonicalize whitespace, Unicode, or punctuation away before comparison.
+
+When multiple prompt variants are used for the same benchmark instance, the natural multi-prompt extension is:
+
 ```text
-d_input = edit_distance(canonical(input_text), canonical(reference_text))
-d_pred  = edit_distance(canonical(predicted_clean_text), canonical(reference_text))
+RS@K = 1 if any of the K prompt variants succeeds exactly, else 0
+```
+
+and an average per-style success rate can also be reported across the same set of prompt variants.
+
+### 11.2 Refinement Gain
+
+`RG` measures progress toward the deterministic reference using raw-string edit distance.
+
+```text
+d_input = edit_distance(input_text, reference_text)
+d_pred  = edit_distance(predicted_clean_text, reference_text)
 
 if d_input == 0:
     refinement_gain = 1.0 if d_pred == 0 else 0.0
 else:
-    refinement_gain = clamp((d_input - d_pred) / d_input, -1.0, 1.0)
+    refinement_gain = 1 - d_pred / d_input
 ```
 
 Notes:
 
-- `canonical(...)` should normalize Unicode and collapse whitespace before matching
-- `Workflow Success` remains the primary exact-execution metric
-- `Refinement Gain` captures whether the model moved the text closer to the deterministic reference, even when exact match fails
-- report both exact success and gain, because models can partially refine text without fully reproducing the reference
+- `RG = 1` means the prediction exactly matches the deterministic reference text
+- `RG = 0` means the prediction makes no progress relative to the raw input
+- `RG < 0` means the prediction moves farther away from the reference than the raw input was
+- the `d_input = 0` case is necessary for filter-style tasks whose correct reference text is identical to the raw input at the drop point
+
+### 11.3 Order-Consistent Success
+
+For the order-sensitivity track, benchmark rows are grouped by `order_group_instance_id`. A group succeeds only if every slot in the group succeeds under exact recipe execution:
+
+```text
+OCS(group) = 1 if RS(slot) = 1 for all slots in the group, else 0
+```
+
+The reported score is the mean of `OCS(group)` over all order groups.
+
+Auxiliary metrics that may still be useful for analysis:
+
+- `Status Accuracy`
+- `Exact Text Match Rate`
+- `Canonical Text Match Rate` as a relaxed secondary analysis only
 
 Main slices:
 
@@ -577,14 +610,12 @@ Main slices:
 
 Order-sensitivity metrics:
 
-- `Order-Variant Success`
-- `Order-Family Success`
 - `Order-Consistent Success`
-- `Wrong-Order Collapse Rate`
+- optional wrong-order collapse diagnostics
 
 Atomic metrics:
 
-- per-operator success rate
+- per-operator recipe success rate
 - per-operator failure rate
 - per-operator average refinement gain
 - atomic-to-compositional gap
