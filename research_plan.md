@@ -90,9 +90,71 @@ Each active domain defines:
 - materialized main-track variants
 - optional order-sensitivity families
 
-## 5. Benchmark Tracks
+The domain split is important for construction as well as evaluation. We do not start from abstract operator lists and then synthesize fake tasks. Instead, each domain is grounded in raw corpora that naturally exhibit the corresponding refinement needs:
 
-### 5.1 Main Track
+- `web`: HTML cleanup, link removal, whitespace normalization, and content-quality filtering
+- `arxiv`: LaTeX/source cleanup, macro expansion, bibliography/header/comment removal, and source-text filtering
+- `knowledge_base`: support-style corpus cleanup for retrieval and indexing
+- `pii`: privacy-sensitive text sanitization, identifier removal, and release-oriented filtering
+
+This domain grounding serves two purposes:
+
+1. it makes the benchmark requests realistic rather than operator-game prompts
+2. it lets us mine workflows from actual operator activity on raw data rather than manually inventing all compositions
+
+## 5. Retained Operator Set
+
+CDR-Bench v1 currently keeps a restricted text-first operator set that can be replayed deterministically and mapped cleanly into a single final text output.
+
+Retained mappers:
+
+- `clean_channel_id_mapper`
+- `clean_copyright_mapper`
+- `clean_email_mapper`
+- `clean_html_mapper`
+- `clean_ip_mapper`
+- `clean_jwt_mapper`
+- `clean_links_mapper`
+- `clean_mac_mapper`
+- `clean_path_mapper`
+- `clean_phone_mapper`
+- `clean_secret_mapper`
+- `expand_macro_mapper`
+- `extract_tables_from_html_mapper`
+- `fix_unicode_mapper`
+- `latex_figure_context_extractor_mapper`
+- `punctuation_normalization_mapper`
+- `remove_bibliography_mapper`
+- `remove_comments_mapper`
+- `remove_header_mapper`
+- `remove_long_words_mapper`
+- `remove_repeat_sentences_mapper`
+- `remove_specific_chars_mapper`
+- `remove_words_with_incorrect_substrings_mapper`
+- `whitespace_normalization_mapper`
+
+Retained filters:
+
+- `alphanumeric_filter`
+- `average_line_length_filter`
+- `character_repetition_filter`
+- `maximum_line_length_filter`
+- `text_length_filter`
+- `word_repetition_filter`
+- `words_num_filter`
+
+Selection constraints for v1:
+
+- benchmark mappers must preserve one input row to one output row
+- operators must admit deterministic replay in the local Data-Juicer checkout
+- the final benchmark output for each sample must still be representable as a single `status + clean_text` pair
+- operators with unstable semantics, external dependencies that break determinism, or poor promptability are excluded from the benchmark set
+
+## 6. Benchmark Tracks
+
+CDR-Bench is materialized as three related but distinct tracks.
+
+### 6.1 Main Track
 
 The main track evaluates direct execution of compositional data refinement.
 
@@ -106,10 +168,10 @@ Main-track sampling rules:
 
 - clean-only instances require the reference text to differ from the input
 - filter variants recalibrate thresholds to target balanced `KEEP` / `DROP`
-- default target drop rate is `0.5`
+- the default target drop rate is `0.5`
 - fallback workflows are excluded from benchmark materialization
 
-### 5.2 Order-Sensitivity Track
+### 6.2 Order-Sensitivity Track
 
 The order-sensitivity track is a grouped diagnostic track, not part of the main score.
 
@@ -128,7 +190,7 @@ Each family contains three slots:
 
 A group is kept only if at least two slots produce different references. Group-level success requires all three slots to be correct, which tests whether a model can follow the requested order rather than collapse to a generic cleaning strategy.
 
-### 5.3 Atomic Operator Calibration
+### 6.3 Atomic Operator Calibration
 
 The atomic set estimates single-operator difficulty.
 
@@ -141,111 +203,311 @@ Use cases:
 - compute atomic-to-compositional gaps
 - verify whether main-track failures exceed isolated operator failures
 
-## 6. Construction Pipeline
+## 7. End-to-End Construction Pipeline
 
-### 6.1 Data Download
+This section is the most important one for the benchmark-construction method. The current repository implements a seven-stage pipeline that starts from raw JSONL corpora and ends with eval-ready prompt files and model-scoring scripts.
 
-Download curated raw JSONL files into `data/raw/` from the Hugging Face raw-data repository.
+### 7.1 Stage 1: Curated Raw Data Collection
 
-### 6.2 Data-Juicer Tagging
+We first collect domain-relevant raw corpora and store them as JSONL files under `data/raw/`. The current release manifest pulls curated files from a Hugging Face raw-data repository. The raw pool includes sources such as web pages, arXiv/LaTeX source text, support-style documents, and PII-heavy corpora.
 
-Run each candidate operator through the repo-local Data-Juicer checkout and record whether each operator is active on each sample.
+The design principle is to start from naturally messy text rather than synthetic operator inputs. This increases ecological validity and allows the subsequent mining stages to discover realistic operator combinations.
 
-Outputs:
+Primary output:
+
+- `data/raw/<domain>/*.jsonl`
+
+### 7.2 Stage 2: Operator Tagging and Domain Assignment
+
+Next, we run the repo-local Data-Juicer checkout to probe each raw sample with the retained operators. This stage has two goals:
+
+1. assign each sample to a benchmark domain
+2. record which operators are actually active on that sample
+
+The tagging logic distinguishes between two cases:
+
+- mappers are replayed to see whether they materially change the text
+- filters are analyzed through their statistics and keep/drop behavior
+
+For each sample, we save operator-activity metadata such as active mapper names, filter statistics, and domain labels. This stage is the bridge between raw corpora and downstream workflow mining.
+
+Primary outputs:
 
 - `data/processed/domain_tags/*.jsonl`
 - `data/processed/domain_filtered/*.jsonl`
 - `data/processed/domain_filtered/all.jsonl`
 - `data/processed/domain_operator_catalog.csv`
+- `data/processed/domain_labeling_summary.csv`
+- `data/processed/dj_cli_tagging/`
 
-### 6.3 Bottom-Up Workflow Mining
+Construction notes:
 
-Mine frequent active mapper/operator combinations per domain.
+- most text-cleaning mappers are executed through `dj-process`
+- meta/stat filters are executed through `dj-analyze`
+- only one-row-to-one-row mapper behavior is retained for benchmark construction
+- extraction operators such as `extract_tables_from_html_mapper` and `latex_figure_context_extractor_mapper` are serialized back into deterministic text in the `text` field
 
-Rules:
+### 7.3 Stage 3: Bottom-Up Workflow Mining
 
-- a concrete workflow candidate needs at least 5 supporting samples by default
-- selected workflows are data-supported candidates
-- fallback coverage candidates are recorded for inspection but excluded from `selected_workflows.csv`
+After tagging, we mine candidate workflows separately inside each domain. The unit we mine first is not a fully ordered pipeline, but a supported set of active clean operators observed on real records.
 
-Outputs:
+The mining stage answers:
+
+- which clean operators frequently co-occur on real samples in a domain
+- which combinations have enough support to justify benchmark inclusion
+- which domain/operator combinations are too rare and should remain fallback-only
+
+By default, a concrete workflow candidate must have at least five supporting samples. Candidates that fail the support threshold may still be recorded as fallback coverage artifacts, but they are not allowed into the benchmark materialization path.
+
+Primary outputs:
 
 - `data/processed/workflow_mining/<domain>/selected_workflows.csv`
 - `data/processed/workflow_mining/<domain>/workflow_families.csv`
 - `data/processed/workflow_mining/<domain>/workflow_candidates.yaml`
+- `data/processed/workflow_mining/domain_workflow_mining_summary.csv`
 
-### 6.4 Workflow Library Materialization
+Methodologically, this stage is what keeps the benchmark from becoming a hand-written list of arbitrary operator recipes. The main workflow pool is data-supported.
 
-Convert mined mapper sets into ordered clean sequences and attach candidate filters.
+### 7.4 Stage 4: Workflow Library Materialization
 
-The materializer scans filter statistics at every checkpoint:
+The mining output still does not define fully replayable benchmark workflows. The next step converts mined operator sets into ordered deterministic clean sequences and attaches candidate filters.
 
-- `S0`: raw input
-- `S1...Sfinal`: after each clean step
+This stage performs four concrete operations:
 
-For the main track, only `clean-only`, `filter-then-clean`, and `clean-then-filter` variants are kept. Middle insertion is used only for the order-sensitivity track.
+1. order mined clean sets into deterministic clean sequences
+2. replay those clean sequences to construct intermediate checkpoints `S0, S1, ..., Sfinal`
+3. scan filter statistics at each checkpoint
+4. materialize benchmark-ready workflow variants and order-sensitivity families
 
-Outputs:
+Checkpoint semantics:
+
+- `S0`: the raw input text
+- `S1 ... Sfinal`: the text after each successive clean step
+
+The checkpoint scan is what lets us attach filters at different positions instead of always filtering only raw text or only final text.
+
+The workflow library stage produces:
+
+- main-track workflow variants: `clean-only`, `filter-then-clean`, `clean-then-filter`
+- order-sensitivity families: `front`, `middle`, `end`
+- filter-attachment metadata
+- checkpoint-level filter statistics used later for threshold calibration
+
+Primary outputs:
 
 - `data/processed/workflow_library/<domain>/workflow_library.yaml`
 - `data/processed/workflow_library/<domain>/workflow_variants.csv`
 - `data/processed/workflow_library/<domain>/filter_attachments.csv`
 - `data/processed/workflow_library/<domain>/checkpoint_filter_stats.csv`
 - `data/processed/workflow_library/<domain>/order_sensitivity_families.csv`
+- `data/processed/workflow_library/workflow_library_summary.csv`
 
-### 6.5 Benchmark Instance Materialization
+### 7.5 Stage 5: Benchmark Instance Materialization and Deterministic References
 
-Generate final benchmark instances and deterministic references.
+The workflow library defines workflow templates; it does not yet define the final benchmark instances. In this stage, we select concrete samples, calibrate thresholds, replay deterministic references, and write the final benchmark JSONL files.
 
-Outputs:
+This stage is implemented in `materialize_benchmark_instances.py` and currently handles all three tracks.
+
+#### Main-track instance materialization
+
+For each workflow variant:
+
+1. gather candidate records that support the required clean operators
+2. exclude samples above the configured raw-input length cap
+3. if the workflow includes a filter, compute the relevant filter statistic at the filter insertion point
+4. recalibrate the threshold on the candidate pool toward a target drop rate
+5. replay the full deterministic workflow on the selected records
+6. keep only instances that satisfy balance and quality constraints
+
+For `clean-only` workflows, we keep only instances whose final text differs from the raw input.
+
+#### Order-sensitivity materialization
+
+For each order family:
+
+1. use the same raw record across `front`, `middle`, and `end`
+2. calibrate one shared threshold across the family
+3. replay all three variants
+4. keep the group only if at least two slots have different deterministic references
+5. require a minimum number of genuinely order-sensitive groups per family
+
+#### Atomic materialization
+
+Atomic construction is global rather than domain-local.
+
+- for mapper operators, we search all records where the mapper is active and keep outputs that actually change the text
+- for filter operators, we compute the relevant statistic on the raw text, recalibrate a balanced threshold, and then sample balanced `KEEP` / `DROP` cases
+
+Atomic instances are keyed by operator and retain `source_domain` only as diagnostic metadata.
+
+Deterministic reference execution records:
+
+- `reference_status`
+- `reference_text`
+- `intermediate_text_at_drop`
+- `reference_trace`
+
+The `reference_trace` field stores step-level replay metadata, which is useful for debugging and future error analysis but remains hidden from the model during evaluation.
+
+Primary outputs:
 
 - `data/benchmark/main.jsonl`
 - `data/benchmark/order_sensitivity.jsonl`
 - `data/benchmark/atomic_ops.jsonl`
-- summary CSVs for all three sets
+- `data/benchmark/main_summary.csv`
+- `data/benchmark/order_sensitivity_summary.csv`
+- `data/benchmark/atomic_ops_summary.csv`
 
-This step intentionally does not generate prompts yet. Prompt generation is separated so we can later compare robust natural-language phrasings without changing the benchmark references.
+### 7.6 Stage 6: Prompt Library Generation
 
-## 7. Threshold and Sampling Policy
+Prompt generation is intentionally separated from deterministic benchmark construction. This separation matters because we want to vary user-facing wording without regenerating the hidden references.
 
-Filter thresholds should not blindly use Data-Juicer defaults. The pipeline first scans filter status/statistics, then recalibrates thresholds during benchmark materialization.
+The prompt pipeline operates at the workflow level rather than the instance level. Given a workflow definition, operator evidence, and filter thresholds, it produces multiple stylistically distinct but functionally equivalent natural-language requests.
 
-Main-track filter variants:
+Current prompt generation principles:
 
-- target balanced `KEEP` / `DROP`
-- choose thresholds from eligible candidate statistic distributions
-- skip variants that cannot satisfy minimum keep/drop counts
-- prefer source-record diversity when selecting final rows, so different workflows do not repeatedly use the same few examples
-- cap or disable raw input length before materialization to match the intended LLM prompt budget
+- preserve the exact internal workflow order
+- express any active filter threshold in human-facing language
+- hide Data-Juicer operator names and implementation details
+- produce prompts that sound like plausible user requests rather than operator checklists
 
-Order-sensitivity variants:
+Each generated candidate is then judged for:
 
-- use a shared threshold for `front / middle / end`
-- keep only input groups with genuine order-dependent references
-- require a minimum number of order-sensitive groups
+- functional equivalence
+- order correctness
+- threshold grounding
+- absence of code leakage
+- compatibility with a fixed benchmark output wrapper
 
-Human-facing threshold values are rounded:
+Primary outputs:
 
-- length/count thresholds use coarse readable values such as 5, 10, 50, 100, 1000
-- ordinary ratios use a 0.01 grid
-- very small ratios may keep finer grids such as 0.001 or 0.0001
-- calibrated ratio thresholds equal to 0 are treated as degenerate; the default materialization policy first tries a small positive threshold such as 0.001, and the variant is skipped if it cannot maintain enough keep/drop examples
+- `data/benchmark_prompts/<track>/workflow_prompt_library.jsonl`
+- `data/benchmark_prompts/<track>/prompt_generation_summary.jsonl`
 
-## 8. Prompting Plan
+### 7.7 Stage 7: Eval-Ready Prompt Track Construction
 
-Final prompts should be user-facing data-refinement requests, not operator lists.
+After prompt generation, we combine accepted workflow-level prompt candidates with benchmark rows to create eval-ready files. Each benchmark instance is assigned a small set of prompt variants sampled deterministically from distinct accepted styles.
 
-Good prompt style:
+This stage keeps:
 
-- describes the desired data-cleaning outcome
-- mentions ordering when order matters
-- states the output contract
-- avoids Data-Juicer operator names
-- avoids exposing hidden thresholds in unnatural forms unless the task naturally requires a numeric constraint
+- the raw input text
+- the deterministic reference
+- the workflow-level prompt key
+- multiple user-facing prompt variants for the same underlying workflow
 
-Internal metadata such as `operator_sequence`, `filter_params_by_name`, and `reference_trace` is kept for deterministic execution, debugging, and later prompt generation.
+Primary outputs:
 
-## 9. Difficulty Calibration
+- `data/benchmark_prompts/<track>/eval/<track>.jsonl`
+- `data/benchmark_prompts/<track>/eval/prompt_eval_build_summary.jsonl`
+
+At this point the benchmark is ready for model inference.
+
+## 8. Threshold Calibration and Sampling Policy
+
+Filter thresholds are not copied blindly from Data-Juicer defaults. Instead, CDR-Bench recalibrates them on the candidate pool used for benchmark construction.
+
+The main reason is methodological: default thresholds are often too loose, too strict, or too domain-misaligned for benchmark evaluation. We need task instances that are meaningful, balanced, and promptable.
+
+### 8.1 Main-Track Filter Calibration
+
+For a main-track workflow with one filter:
+
+1. compute the relevant filter statistic at the actual insertion point of the filter
+2. gather the statistic over all eligible candidate records
+3. choose a threshold by quantile so the target drop rate is approximately met
+4. round the threshold into a human-readable value
+5. replay the deterministic workflow and keep the variant only if minimum `KEEP` and `DROP` counts are satisfied
+
+The default target drop rate is `0.5`.
+
+### 8.2 Order-Family Filter Calibration
+
+Order families use one shared filter threshold across `front`, `middle`, and `end`. The statistic pool is collected across the relevant insertion points for all family members, then one calibrated threshold is applied to all three slots.
+
+This is necessary so the comparison isolates order effects rather than threshold mismatches.
+
+### 8.3 Atomic Filter Calibration
+
+Atomic filter tasks are calibrated globally per operator. We compute the operator statistic on raw text, estimate a balanced threshold, and then select balanced `KEEP` / `DROP` rows subject to minimum class counts.
+
+### 8.4 Degenerate Ratio Thresholds
+
+Very small ratio filters create a special problem: a calibrated threshold can round to exactly `0`, which produces unnatural user-facing tasks. The current policy therefore treats zero-ratio thresholds as degenerate.
+
+Default handling:
+
+- if a ratio threshold rounds to `0`, first try a small positive threshold such as `0.001`
+- if the variant still cannot sustain enough `KEEP` and `DROP` examples, skip it
+
+Alternative handling:
+
+- skip the variant immediately
+
+### 8.5 Diversity-Aware Sampling
+
+Final row selection is best-effort diversity-aware. When the same source record is eligible for many workflows, earlier selections increase that record's usage count, and later selections deprioritize it. This helps reduce over-reuse of a few easy samples across the benchmark.
+
+### 8.6 Input-Length Control
+
+Raw inputs can be capped before materialization using `--max-input-chars`. This is a practical rather than conceptual constraint: the benchmark should stay within a feasible prompt budget for current strong models while still covering non-trivial long-context cases.
+
+## 9. Prompting and Evaluation Pipeline
+
+The deterministic benchmark and the model-evaluation pipeline are separate layers.
+
+### 9.1 Model Input Format
+
+At evaluation time, the model sees:
+
+- a user-facing natural-language refinement request
+- the raw input text
+- a fixed JSON-only output contract
+
+The required output is:
+
+```json
+{"status": "KEEP", "clean_text": "..."}
+```
+
+or:
+
+```json
+{"status": "DROP", "clean_text": "..."}
+```
+
+If the deterministic workflow drops the sample, `clean_text` is defined as the text state at the drop point.
+
+### 9.2 API-Compatible Inference
+
+The current evaluation code supports OpenAI-compatible APIs for both external hosted models and local models served through `vllm`. This keeps the model interface uniform across evaluation settings.
+
+The current atomic-first evaluation stack supports:
+
+- direct online inference on eval-ready JSONL files
+- score-only evaluation for prediction files already generated elsewhere
+- local `vllm` serving for open-weight models
+
+### 9.3 Why Prompt Generation Is Separate
+
+Keeping prompt generation separate from reference construction has three benefits:
+
+1. prompt variants can be revised without re-running deterministic references
+2. benchmark validity does not depend on one brittle prompt template
+3. prompt robustness can be studied as an independent axis
+
+### 9.4 What Is Hidden from the Model
+
+The model never sees:
+
+- operator names
+- operator code or documentation
+- filter parameter keys
+- threshold-calibration metadata
+- the deterministic `reference_trace`
+
+These remain internal benchmark metadata only.
+
+## 10. Difficulty Calibration
 
 Difficulty should not be assigned only by workflow length.
 
@@ -270,7 +532,7 @@ compositional gap = workflow failure beyond what atomic difficulty predicts
 
 This supports the claim that CDR-Bench measures compositional execution, not only isolated operator imitation.
 
-## 10. Metrics
+## 11. Metrics
 
 Main metrics:
 
@@ -278,6 +540,31 @@ Main metrics:
 - `Status Accuracy`
 - `CleanText Exact Match`
 - `CleanText Canonical Match`
+
+Definitions:
+
+```text
+status_match = predicted_status == reference_status
+text_match = canonical(predicted_clean_text) == canonical(reference_text)
+workflow_success = status_match AND text_match
+```
+
+```text
+d_input = edit_distance(canonical(input_text), canonical(reference_text))
+d_pred  = edit_distance(canonical(predicted_clean_text), canonical(reference_text))
+
+if d_input == 0:
+    refinement_gain = 1.0 if d_pred == 0 else 0.0
+else:
+    refinement_gain = clamp((d_input - d_pred) / d_input, -1.0, 1.0)
+```
+
+Notes:
+
+- `canonical(...)` should normalize Unicode and collapse whitespace before matching
+- `Workflow Success` remains the primary exact-execution metric
+- `Refinement Gain` captures whether the model moved the text closer to the deterministic reference, even when exact match fails
+- report both exact success and gain, because models can partially refine text without fully reproducing the reference
 
 Main slices:
 
@@ -299,9 +586,10 @@ Atomic metrics:
 
 - per-operator success rate
 - per-operator failure rate
+- per-operator average refinement gain
 - atomic-to-compositional gap
 
-## 11. Target Scale
+## 12. Target Scale
 
 Planned formal scale:
 
@@ -311,7 +599,7 @@ Planned formal scale:
 
 These are targets rather than hard guarantees. Actual size depends on how many variants pass quality gates.
 
-## 12. Research Value
+## 13. Research Value
 
 CDR-Bench is valuable if it can support the following claims:
 
@@ -328,12 +616,26 @@ Key risks and mitigations:
 - Thresholds may become unnatural. Mitigation: recalibrate and round to human-readable values.
 - Order-sensitive examples may be rare. Mitigation: keep them as a diagnostic track rather than forcing them into the main score.
 
-## 13. Immediate Next Steps
+## 14. Current Status and Remaining Paper Tasks
 
-1. Regenerate workflow mining outputs after fallback exclusion.
-2. Regenerate workflow library with current threshold rounding.
-3. Regenerate benchmark instances for main, order sensitivity, and atomic operators.
-4. Inspect summary CSVs for skipped variants, keep/drop balance, and order-family counts.
-5. Implement workflow-to-prompt generation from metadata.
-6. Run pilot models on atomic, main, and order tracks.
-7. Calibrate difficulty tiers using atomic failure rates and pilot workflow results.
+Implemented in the current repository:
+
+- raw-data download and manifest handling
+- domain assignment and operator tagging
+- bottom-up workflow mining with fallback exclusion
+- workflow-library materialization with checkpoint-level filter stats
+- benchmark-instance materialization for main, order-sensitivity, and atomic tracks
+- workflow-level prompt generation and judging
+- eval-ready prompt-track construction
+- API-compatible model evaluation
+- atomic-first scoring with `workflow_success` and `refinement_gain`
+- local `vllm` serving support for open-weight model evaluation
+
+What remains for the paper:
+
+1. freeze the reported benchmark snapshot and final dataset counts
+2. write the benchmark-construction method section from Sections 4--9 of this plan
+3. summarize the retained operator set in an appendix table
+4. run pilot and final model suites on atomic, main, and order tracks
+5. define the reported difficulty tiers using atomic and compositional results
+6. choose the final paper tables for benchmark composition, operator coverage, and evaluation slices

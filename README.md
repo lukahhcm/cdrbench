@@ -255,6 +255,25 @@ Atomic calibration:
 - `source_domain` is diagnostic only.
 - Use it to estimate atomic operator difficulty and compositional gaps.
 
+Evaluation metrics:
+
+- `status_match = predicted_status == reference_status`
+- `text_match = canonical(predicted_clean_text) == canonical(reference_text)`
+- `workflow_success = status_match AND text_match`
+- `refinement_gain` is edit-distance improvement from input toward the reference:
+
+```text
+d_input = edit_distance(canonical(input_text), canonical(reference_text))
+d_pred  = edit_distance(canonical(predicted_clean_text), canonical(reference_text))
+
+if d_input == 0:
+    refinement_gain = 1.0 if d_pred == 0 else 0.0
+else:
+    refinement_gain = clamp((d_input - d_pred) / d_input, -1.0, 1.0)
+```
+
+The repo evaluator currently canonicalizes text with Unicode normalization plus whitespace collapsing before exact-match and edit-distance comparisons.
+
 Benchmark composition visualization:
 
 If you want a quick paper-style overview of what the benchmark is made of, generate the composition plots:
@@ -334,6 +353,81 @@ Useful overrides:
 ./scripts/run_prompt_pipeline_all_tracks.sh --prompt-source template
 ./scripts/run_prompt_pipeline_all_tracks.sh --no-resume
 ```
+
+## 10. Atomic Evaluation
+
+Atomic evaluation can now run in two modes:
+
+1. score an existing prediction JSONL
+2. call any OpenAI-compatible API directly, including a local `vllm` server
+
+Score existing server outputs:
+
+```bash
+./scripts/eval_atomic_benchmark.sh \
+  --benchmark-path data/benchmark/atomic_ops.jsonl \
+  --predictions-path /path/to/atomic_predictions.jsonl \
+  --output-dir data/eval_runs/atomic_existing
+```
+
+If the prediction file uses non-default field names, override them:
+
+```bash
+./scripts/eval_atomic_benchmark.sh \
+  --benchmark-path data/benchmark/atomic_ops.jsonl \
+  --predictions-path /path/to/atomic_predictions.jsonl \
+  --prediction-status-field status \
+  --prediction-text-field clean_text \
+  --output-dir data/eval_runs/atomic_existing
+```
+
+Run online evaluation against an external API:
+
+```bash
+./scripts/eval_atomic_benchmark.sh \
+  --eval-path data/benchmark_prompts/atomic_ops/eval/atomic_ops.jsonl \
+  --benchmark-path data/benchmark/atomic_ops.jsonl \
+  --model gpt-5.4 \
+  --base-url http://123.57.212.178:3333/v1 \
+  --output-dir data/eval_runs/atomic_gpt54
+```
+
+The scorer writes:
+
+- `predictions.jsonl` in online mode
+- `scored/scored_predictions.jsonl` or `scored_predictions.jsonl`
+- `summary.json`
+- `by_operator.csv`
+- `by_source_domain.csv`
+- `by_reference_status.csv`
+
+`summary.json` reports `workflow_success_rate`, `status_accuracy`, `canonical_text_match_rate`, and `avg_refinement_gain`.
+
+## 11. Local vLLM Serving
+
+To benchmark a local model through the same OpenAI-compatible client path, launch `vllm` first:
+
+```bash
+./scripts/serve_vllm_openai.sh \
+  --model /path/to/local/model \
+  --served-model-name local-model \
+  --tensor-parallel-size 2 \
+  --port 8000
+```
+
+Then point the atomic evaluator at the local server:
+
+```bash
+./scripts/eval_atomic_benchmark.sh \
+  --eval-path data/benchmark_prompts/atomic_ops/eval/atomic_ops.jsonl \
+  --benchmark-path data/benchmark/atomic_ops.jsonl \
+  --model local-model \
+  --base-url http://127.0.0.1:8000/v1 \
+  --api-key EMPTY \
+  --output-dir data/eval_runs/atomic_local_model
+```
+
+The `vllm` launcher uses `--generation-config vllm` so server-side defaults from a model repo do not silently change benchmark decoding behavior.
 
 Outputs:
 

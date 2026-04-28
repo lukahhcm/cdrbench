@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import time
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -215,6 +216,13 @@ Return JSON only:
 MAX_JSON_RETRIES = 3
 RAW_RESPONSE_PREVIEW_CHARS = 800
 EVAL_PROGRESS_EVERY = 200
+REQUEST_MAX_RETRIES = 5
+REQUEST_RETRY_BASE_SECONDS = 2.0
+REQUEST_RETRY_MAX_SECONDS = 20.0
+
+
+class TransientLLMError(RuntimeError):
+    pass
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -236,6 +244,84 @@ def _write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> int:
             count += 1
     tmp_path.replace(path)
     return count
+
+
+def _is_retryable_llm_error(exc: Exception) -> bool:
+    status_code = getattr(exc, 'status_code', None)
+    if isinstance(status_code, int) and status_code in {408, 409, 429, 500, 502, 503, 504}:
+        return True
+    response = getattr(exc, 'response', None)
+    response_status = getattr(response, 'status_code', None)
+    if isinstance(response_status, int) and response_status in {408, 409, 429, 500, 502, 503, 504}:
+        return True
+
+    message = str(exc).lower()
+    retryable_signals = [
+        'rate limit',
+        'timeout',
+        'timed out',
+        'network closed',
+        'connection reset',
+        'server disconnected',
+        'temporarily unavailable',
+        'internal_server_error',
+        'error code: 500',
+        'error code: 502',
+        'error code: 503',
+        'error code: 504',
+        'unavailable',
+        'apiconnectionerror',
+    ]
+    return any(signal in message for signal in retryable_signals)
+
+
+def _request_retry_sleep_seconds(attempt: int) -> float:
+    return min(REQUEST_RETRY_BASE_SECONDS * (2 ** max(attempt - 1, 0)), REQUEST_RETRY_MAX_SECONDS)
+
+
+def _chat_completion_with_retries(
+    *,
+    client,
+    model: str,
+    system_prompt: str,
+    user_prompt: str,
+    temperature: float,
+    request_kind: str,
+    workflow_key: str,
+    candidate_id: str | None = None,
+) -> str:
+    last_error: Exception | None = None
+    for attempt in range(1, REQUEST_MAX_RETRIES + 2):
+        try:
+            return chat_completion(
+                client=client,
+                model=model,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                temperature=temperature,
+            )
+        except Exception as exc:
+            last_error = exc
+            retryable = _is_retryable_llm_error(exc)
+            target = f'workflow={workflow_key}'
+            if candidate_id:
+                target += f' candidate={candidate_id}'
+            if not retryable or attempt > REQUEST_MAX_RETRIES:
+                if retryable:
+                    raise TransientLLMError(
+                        f'{request_kind} request failed after {attempt} attempts for {target}: {exc}'
+                    ) from exc
+                raise
+            sleep_seconds = _request_retry_sleep_seconds(attempt)
+            print(
+                f'retry {request_kind} request: attempt={attempt}/{REQUEST_MAX_RETRIES + 1} '
+                f'{target} sleep_sec={sleep_seconds:.1f} error={exc}',
+                flush=True,
+            )
+            time.sleep(sleep_seconds)
+    raise TransientLLMError(
+        f'{request_kind} request failed unexpectedly for workflow={workflow_key}: {last_error}'
+    ) from last_error
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -467,12 +553,15 @@ def _judge_user_prompt(entry: dict[str, Any], candidate: dict[str, Any], *, clie
     last_error: Exception | None = None
     last_content = ''
     for attempt in range(1, MAX_JSON_RETRIES + 1):
-        content = chat_completion(
+        content = _chat_completion_with_retries(
             client=client,
             model=model,
             system_prompt=JUDGE_SYSTEM_PROMPT,
             user_prompt=user_prompt,
             temperature=temperature,
+            request_kind='judge',
+            workflow_key=str(entry.get('workflow_prompt_key') or ''),
+            candidate_id=str(candidate.get('candidate_id') or ''),
         )
         last_content = content
         try:
@@ -517,6 +606,28 @@ def _load_cache(path: Path) -> dict[str, dict[str, Any]]:
         key = row.get('cache_key')
         entry = row.get('library_entry')
         if isinstance(key, str) and isinstance(entry, dict):
+            accepted_candidate_count = int(entry.get('accepted_candidate_count', 0) or 0)
+            judged_summary = entry.get('judged_candidate_summary')
+            if accepted_candidate_count <= 0 and isinstance(judged_summary, list) and judged_summary:
+                all_judge_error = True
+                saw_judge_error = False
+                for candidate_summary in judged_summary:
+                    issues = candidate_summary.get('judge_issues') if isinstance(candidate_summary, dict) else None
+                    if not isinstance(issues, list) or not issues:
+                        all_judge_error = False
+                        continue
+                    issue_strings = [str(issue) for issue in issues]
+                    has_judge_error = any(issue.startswith('judge_error:') for issue in issue_strings)
+                    saw_judge_error = saw_judge_error or has_judge_error
+                    if not has_judge_error:
+                        all_judge_error = False
+                if saw_judge_error and all_judge_error:
+                    print(
+                        f'skip suspect cache entry with only judge errors: '
+                        f'workflow={entry.get("workflow_prompt_key")} cache_key={key}',
+                        flush=True,
+                    )
+                    continue
             cache[key] = entry
     return cache
 
@@ -539,12 +650,14 @@ def _call_llm_for_candidates(
     last_content = ''
     payload: dict[str, Any] | None = None
     for attempt in range(1, MAX_JSON_RETRIES + 1):
-        content = chat_completion(
+        content = _chat_completion_with_retries(
             client=client,
             model=model,
             system_prompt=GENERATION_SYSTEM_PROMPT,
             user_prompt=_generation_user_prompt(bundle),
             temperature=temperature,
+            request_kind='generation',
+            workflow_key=str(bundle.get('workflow_prompt_key') or ''),
         )
         last_content = content
         try:
@@ -649,6 +762,8 @@ def _build_library_entry(
     for candidate in candidates:
         try:
             verdict = _judge_user_prompt(bundle, candidate, client=client, model=judge_model, temperature=judge_temperature)
+        except TransientLLMError:
+            raise
         except Exception as exc:
             print(
                 f"judge failed; rejecting candidate "
