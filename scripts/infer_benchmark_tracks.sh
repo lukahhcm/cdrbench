@@ -23,6 +23,7 @@ Options:
   --api-key <key>                      API key. For local vLLM you can use EMPTY
   --prompt-variant-indices <spec>      Comma-separated indices or all. Default: all
   --max-samples <int>                  Optional cap for smoke tests. Default: 0 (all)
+  --max-input-chars <int>              Skip inference for samples longer than this many chars. Default: 0 (disabled)
   --temperature <float>                Default: 0.0
   --max-tokens <int>                   Default: 4096
   --progress-every <int>               Default: 20
@@ -61,6 +62,7 @@ BASE_URL=""
 API_KEY=""
 PROMPT_VARIANT_INDICES="all"
 MAX_SAMPLES="0"
+MAX_INPUT_CHARS="0"
 TEMPERATURE="0.0"
 MAX_TOKENS="4096"
 PROGRESS_EVERY="20"
@@ -98,6 +100,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --max-samples)
       MAX_SAMPLES="$2"
+      shift 2
+      ;;
+    --max-input-chars)
+      MAX_INPUT_CHARS="$2"
       shift 2
       ;;
     --temperature)
@@ -170,6 +176,7 @@ for track in "${TRACKS[@]}"; do
     --model "$MODEL"
     --prompt-variant-indices "$PROMPT_VARIANT_INDICES"
     --max-samples "$MAX_SAMPLES"
+    --max-input-chars "$MAX_INPUT_CHARS"
     --temperature "$TEMPERATURE"
     --max-tokens "$MAX_TOKENS"
     --progress-every "$PROGRESS_EVERY"

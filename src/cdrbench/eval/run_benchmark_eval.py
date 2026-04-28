@@ -652,6 +652,18 @@ def _predict(args: argparse.Namespace) -> None:
     rows = _read_jsonl(eval_path)
     if args.max_samples > 0:
         rows = rows[: args.max_samples]
+    skipped_for_input_length = 0
+    if args.max_input_chars > 0:
+        filtered_rows = []
+        for row in rows:
+            input_length_chars = row.get('input_length_chars')
+            if not isinstance(input_length_chars, int):
+                input_length_chars = len(str(row.get('input_text', '')))
+            if int(input_length_chars) > args.max_input_chars:
+                skipped_for_input_length += 1
+                continue
+            filtered_rows.append(row)
+        rows = filtered_rows
 
     base_url = resolve_base_url(args.base_url)
     api_key = _resolved_api_key(args.api_key, base_url)
@@ -671,7 +683,9 @@ def _predict(args: argparse.Namespace) -> None:
     new_count = 0
     print(
         f'start predict track={_track_name_from_path(eval_path)} model={model} '
-        f'num_rows={total_rows} progress_every={args.progress_every} resume={bool(args.resume)}',
+        f'num_rows={total_rows} skipped_input_too_long={skipped_for_input_length} '
+        f'progress_every={args.progress_every} resume={bool(args.resume)} '
+        f'max_input_chars={args.max_input_chars}',
         flush=True,
     )
     for index, row in enumerate(rows, start=1):
@@ -767,6 +781,8 @@ def _predict(args: argparse.Namespace) -> None:
         'base_url': base_url,
         'num_instances': len(output_rows),
         'num_new_variant_predictions': new_count,
+        'num_skipped_for_input_length': skipped_for_input_length,
+        'max_input_chars': args.max_input_chars,
         'requested_prompt_variant_indices': (
             args.prompt_variant_indices if args.prompt_variant_indices is not None else str(args.prompt_variant_index)
         ),
@@ -1039,6 +1055,12 @@ def main() -> None:
         help='Comma-separated prompt variant indices to run, or "all". Overrides --prompt-variant-index when set.',
     )
     predict_parser.add_argument('--max-samples', type=int, default=0)
+    predict_parser.add_argument(
+        '--max-input-chars',
+        type=int,
+        default=0,
+        help='Skip inference for samples whose input_length_chars exceeds this threshold. 0 disables the filter.',
+    )
     predict_parser.add_argument('--max-retries', type=int, default=2)
     predict_parser.add_argument('--retry-sleep-seconds', type=float, default=2.0)
     predict_parser.add_argument('--progress-every', type=int, default=DEFAULT_PROGRESS_EVERY)
