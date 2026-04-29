@@ -8,16 +8,18 @@ Usage:
 
 Run the full CDR-Bench recipe pipeline end-to-end under a configurable text-length cap:
 
-  1. Filter the domain-filtered corpus to <= max-text-length
+  1. Filter raw corpora to <= max-text-length while assigning domain tags
   2. Mine recipe families from tagged records under the same length cap
   3. Materialize deterministic recipe libraries
   4. Materialize benchmark instances and references
-  5. Seed old prompt caches when available
-  6. Run the prompt pipeline to build eval-ready prompt tracks
+  5. Build prompt libraries and final eval-ready benchmark tracks
 
 Options:
   --max-text-length <int>                 Default: 10000
-  --source-filtered-path <path>           Default: data/processed/domain_filtered/all.jsonl
+  --corpora-config <path>                 Default: configs/corpora.yaml
+  --domains-config <path>                 Default: configs/domains.yaml
+  --corpora <csv>                         Optional subset of corpora to process
+  --max-records <int>                     Optional head sample per corpus for quick dry runs
   --filtered-output-dir <path>            Default: data/processed/domain_filtered
   --tagged-dir <path>                     Default: data/processed/domain_tags
   --recipe-mining-output-dir <path>       Default: data/processed/recipe_mining
@@ -53,7 +55,10 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
 MAX_TEXT_LENGTH="10000"
-SOURCE_FILTERED_PATH="data/processed/domain_filtered/all.jsonl"
+CORPORA_CONFIG="configs/corpora.yaml"
+DOMAINS_CONFIG="configs/domains.yaml"
+CORPORA_CSV=""
+MAX_RECORDS=""
 FILTERED_OUTPUT_DIR="data/processed/domain_filtered"
 TAGGED_DIR="data/processed/domain_tags"
 RECIPE_MINING_OUTPUT_DIR="data/processed/recipe_mining"
@@ -85,8 +90,20 @@ while [[ $# -gt 0 ]]; do
       MAX_TEXT_LENGTH="$2"
       shift 2
       ;;
-    --source-filtered-path)
-      SOURCE_FILTERED_PATH="$2"
+    --corpora-config)
+      CORPORA_CONFIG="$2"
+      shift 2
+      ;;
+    --domains-config)
+      DOMAINS_CONFIG="$2"
+      shift 2
+      ;;
+    --corpora)
+      CORPORA_CSV="$2"
+      shift 2
+      ;;
+    --max-records)
+      MAX_RECORDS="$2"
       shift 2
       ;;
     --filtered-output-dir)
@@ -179,6 +196,7 @@ done
 
 export PYTHONPATH="$REPO_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
 IFS=',' read -r -a TRACKS <<< "$TRACKS_CSV"
+IFS=',' read -r -a CORPORA <<< "$CORPORA_CSV"
 
 require_file() {
   local path="$1"
@@ -203,17 +221,30 @@ seed_prompt_cache_for_track() {
   fi
 }
 
-echo "[stage 1/5] filter domain-filtered corpus to <= ${MAX_TEXT_LENGTH} chars"
-require_file "$SOURCE_FILTERED_PATH"
-"$PYTHON_BIN" -m cdrbench.prepare_data.filter_domain_filtered_by_length \
-  --input-path "$SOURCE_FILTERED_PATH" \
-  --output-dir "$FILTERED_OUTPUT_DIR" \
+echo "[stage 1/5] filter raw corpora to <= ${MAX_TEXT_LENGTH} chars and assign domain tags"
+require_file "$CORPORA_CONFIG"
+require_file "$DOMAINS_CONFIG"
+tagging_cmd=(
+  "$PYTHON_BIN" -m cdrbench.prepare_data.tag_and_assign_domains
+  --corpora-config "$CORPORA_CONFIG"
+  --domains-config "$DOMAINS_CONFIG"
+  --tagged-dir "$TAGGED_DIR"
+  --filtered-dir "$FILTERED_OUTPUT_DIR"
+  --combined-path "$FILTERED_OUTPUT_DIR/all.jsonl"
   --max-text-length "$MAX_TEXT_LENGTH"
+)
+if [[ -n "$MAX_RECORDS" ]]; then
+  tagging_cmd+=(--max-records "$MAX_RECORDS")
+fi
+if [[ -n "$CORPORA_CSV" ]]; then
+  tagging_cmd+=(--corpora "${CORPORA[@]}")
+fi
+"${tagging_cmd[@]}"
 
 echo "[stage 2/5] mine recipe families"
 "$PYTHON_BIN" -m cdrbench.prepare_data.mine_domain_workflows \
   --tagged-dir "$TAGGED_DIR" \
-  --domains-config configs/domains.yaml \
+  --domains-config "$DOMAINS_CONFIG" \
   --output-dir "$RECIPE_MINING_OUTPUT_DIR" \
   --domain-field assigned_domain \
   --min-active-mappers 2 \

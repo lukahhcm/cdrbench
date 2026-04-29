@@ -325,6 +325,27 @@ def build_cli_input_rows(
     return rows
 
 
+def filter_records_by_text_length(
+    records: list[dict[str, Any]],
+    *,
+    field_map: dict[str, str] | None = None,
+    defaults: dict[str, Any] | None = None,
+    max_text_length: int,
+) -> tuple[list[dict[str, Any]], int]:
+    if max_text_length <= 0:
+        return records, 0
+
+    kept_records: list[dict[str, Any]] = []
+    skipped_records = 0
+    for record in records:
+        text = str(resolve_record_field(record, 'text', field_map=field_map, defaults=defaults, fallback='') or '')
+        if len(text) > max_text_length:
+            skipped_records += 1
+            continue
+        kept_records.append(record)
+    return kept_records, skipped_records
+
+
 def get_keep_boolean(
     value: float | int | None,
     min_val: float | int | None,
@@ -469,10 +490,14 @@ def main() -> None:
     )
     parser.add_argument('--np', type=int, default=4)
     parser.add_argument('--min-active-mappers', type=int, default=2)
+    parser.add_argument('--max-text-length', type=int, default=0, help='Drop raw records with text longer than this before tagging. 0 disables the filter.')
     parser.add_argument('--max-records', type=int, default=None)
     parser.add_argument('--resume', action='store_true', help='Skip existing per-op CLI outputs and re-aggregate.')
     parser.add_argument('--aggregate-only', action='store_true', help='Only aggregate existing CLI outputs without running dj-process/dj-analyze.')
     args = parser.parse_args()
+
+    if args.max_text_length < 0:
+        raise SystemExit('--max-text-length must be >= 0')
 
     root = ROOT
     corpora_cfg = load_domains_config(root / args.corpora_config)['corpora']
@@ -541,8 +566,14 @@ def main() -> None:
             )
 
         raw_records = iter_jsonl(input_source_path)
-        cli_input_rows = build_cli_input_rows(
+        corpus_records, skipped_long_text_records = filter_records_by_text_length(
             raw_records,
+            field_map=field_map,
+            defaults=defaults,
+            max_text_length=args.max_text_length,
+        )
+        cli_input_rows = build_cli_input_rows(
+            corpus_records,
             raw_path=raw_path,
             field_map=field_map,
             defaults=defaults,
@@ -554,10 +585,35 @@ def main() -> None:
         write_jsonl(cli_input_path, cli_input_rows)
 
         input_path = cli_input_path
-        corpus_records = raw_records
         dj_input_records = cli_input_rows
         text_field = 'text'
         per_op_results: dict[str, list[dict[str, Any]]] = {}
+
+        if not corpus_records:
+            tagged_path = root / args.tagged_dir / f'{corpus_name}.jsonl'
+            filtered_path = root / args.filtered_dir / f'{corpus_name}.jsonl'
+            write_jsonl(tagged_path, [])
+            write_jsonl(filtered_path, [])
+            print(
+                f'{corpus_name}: kept 0 / 0 after raw length filter '
+                f'(skipped_long_text={skipped_long_text_records}) -> {filtered_path}'
+            )
+            summary_rows.append(
+                {
+                    'corpus': corpus_name,
+                    'total_records': len(raw_records),
+                    'eligible_records': 0,
+                    'best_candidate_records': 0,
+                    'assigned_records': 0,
+                    'kept_records': 0,
+                    'dropped_records': 0,
+                    'insufficient_mapper_records': 0,
+                    'skipped_long_text_records': skipped_long_text_records,
+                    'mean_active_mapper_count': 0.0,
+                    'keep_rate': 0.0,
+                }
+            )
+            continue
 
         for variant in supported_variants:
             op_key = variant['key']
@@ -728,18 +784,23 @@ def main() -> None:
         filtered_path = root / args.filtered_dir / f'{corpus_name}.jsonl'
         write_jsonl(tagged_path, tagged_rows)
         write_jsonl(filtered_path, filtered_rows)
-        print(f'{corpus_name}: kept {len(filtered_rows)} / {len(tagged_rows)} (assigned {sum(best_candidate_assignments.values())}) -> {filtered_path}')
+        print(
+            f'{corpus_name}: kept {len(filtered_rows)} / {len(tagged_rows)} '
+            f'(assigned {sum(best_candidate_assignments.values())}, '
+            f'skipped_long_text={skipped_long_text_records}) -> {filtered_path}'
+        )
 
         summary_rows.append(
             {
                 'corpus': corpus_name,
-                'total_records': len(tagged_rows),
+                'total_records': len(raw_records),
+                'eligible_records': len(tagged_rows),
                 'best_candidate_records': sum(best_candidate_assignments.values()),
                 'assigned_records': sum(kept_assignments.values()),
                 'kept_records': len(filtered_rows),
                 'dropped_records': len(tagged_rows) - len(filtered_rows),
                 'insufficient_mapper_records': sum(1 for row in tagged_rows if row['active_mapper_count'] < args.min_active_mappers),
-                'skipped_long_text_records': 0,
+                'skipped_long_text_records': skipped_long_text_records,
                 'mean_active_mapper_count': (total_active_mapper_count / len(tagged_rows)) if tagged_rows else 0.0,
                 'keep_rate': (len(filtered_rows) / len(tagged_rows)) if tagged_rows else 0.0,
             }
