@@ -234,8 +234,8 @@ def _build_domain_report(
 
         assigned.sort(key=lambda item: (-item[1], -len(item[0]), item[0]))
         valid_assigned = [(ops, support) for ops, support in assigned if support >= min_workflow_support]
-        selected_workflows = valid_assigned[:max_workflows_per_family]
-        if not selected_workflows:
+        selected_recipes = valid_assigned[:max_workflows_per_family]
+        if not selected_recipes:
             continue
         family_support = sum(support for _, support in assigned)
         kept_families.append(
@@ -243,14 +243,14 @@ def _build_domain_report(
                 'anchor': anchor,
                 'subset_support': family['subset_support'],
                 'family_support': family_support,
-                'selected_workflows': selected_workflows,
+                'selected_recipes': selected_recipes,
             }
         )
 
     for kept_family_idx, kept_family in enumerate(kept_families, start=1):
         family_id = f'{domain}_family_{kept_family_idx:02d}'
         anchor = tuple(kept_family['anchor'])
-        selected_workflows = list(kept_family['selected_workflows'])
+        selected_recipes = list(kept_family['selected_recipes'])
 
         family_rows.append(
             {
@@ -261,13 +261,13 @@ def _build_domain_report(
                 'subset_support': kept_family['subset_support'],
                 'family_support': kept_family['family_support'],
                 'family_support_ratio': kept_family['family_support'] / num_records if num_records else 0.0,
-                'num_concrete_recipe_candidates': len(selected_workflows),
+                'num_concrete_recipe_candidates': len(selected_recipes),
             }
         )
 
         yaml_recipes = []
-        for workflow_rank, (ops, support) in enumerate(selected_workflows, start=1):
-            recipe_id = f'{domain}_recipe_{kept_family_idx:02d}_{workflow_rank:02d}'
+        for recipe_rank, (ops, support) in enumerate(selected_recipes, start=1):
+            recipe_id = f'{domain}_recipe_{kept_family_idx:02d}_{recipe_rank:02d}'
             workflow_rows.append(
                 {
                     'domain': domain,
@@ -338,7 +338,7 @@ def _build_domain_report(
         'source_corpora': dict(source_counter),
         'length_distribution': dict(sorted(length_counter.items())),
         'recipe_families': workflow_yaml_rows,
-        'fallback_workflow_candidates': [
+        'fallback_recipe_candidates': [
             {
                 'operators': row['operators'].split(' | '),
                 'length': row['length'],
@@ -367,7 +367,7 @@ def _build_domain_report(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description='Mine per-domain workflow families and concrete workflow candidates from tagging outputs.'
+        description='Mine per-domain recipe families and concrete recipe candidates from tagging outputs.'
     )
     parser.add_argument('--tagged-dir', default='data/processed/domain_tags')
     parser.add_argument('--domains-config', default='configs/domains.yaml')
@@ -458,8 +458,8 @@ def main() -> None:
         global_yaml['domains'][domain] = {
             'description': report['description'],
             'num_records': report['num_records'],
-            'workflow_families': report['workflow_families'],
-            'fallback_workflow_candidates': report['fallback_workflow_candidates'],
+            'recipe_families': report['recipe_families'],
+            'fallback_recipe_candidates': report['fallback_recipe_candidates'],
         }
 
         summary_rows.append(
@@ -470,8 +470,8 @@ def main() -> None:
                 'active_operator_inventory_size': len(report['active_operator_inventory']),
                 'num_exact_signature_candidates': len(exact_df),
                 'num_frequent_operator_sets': len(subset_df),
-                'num_workflow_families': len(family_df),
-                'num_selected_workflows': len(workflow_df),
+                'num_recipe_families': len(family_df),
+                'num_selected_recipes': len(workflow_df),
                 'min_support_threshold': report['min_support_threshold'],
                 'min_workflow_support': report['min_workflow_support'],
             }
@@ -479,11 +479,11 @@ def main() -> None:
 
         print(
             f"{domain}: records={report['num_records']}, "
-            f"families={len(family_df)}, selected_workflows={len(workflow_df)}"
+            f"families={len(family_df)}, selected_recipes={len(workflow_df)}"
         )
 
     if not summary_rows:
-        raise SystemExit('no domain records found for workflow mining')
+        raise SystemExit('no domain records found for recipe mining')
 
     pd.DataFrame(summary_rows).to_csv(output_dir / 'domain_recipe_mining_summary.csv', index=False)
     (output_dir / 'recipe_candidates.yaml').write_text(
@@ -491,7 +491,7 @@ def main() -> None:
         encoding='utf-8',
     )
     print(
-        f'wrote workflow mining outputs -> {output_dir} '
+        f'wrote recipe mining outputs -> {output_dir} '
         f'(skipped_for_length={skipped_for_length}, max_text_length={args.max_text_length})'
     )
 
