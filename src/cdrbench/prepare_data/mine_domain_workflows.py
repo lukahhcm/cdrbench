@@ -261,18 +261,18 @@ def _build_domain_report(
                 'subset_support': kept_family['subset_support'],
                 'family_support': kept_family['family_support'],
                 'family_support_ratio': kept_family['family_support'] / num_records if num_records else 0.0,
-                'num_concrete_workflow_candidates': len(selected_workflows),
+                'num_concrete_recipe_candidates': len(selected_workflows),
             }
         )
 
-        yaml_workflows = []
+        yaml_recipes = []
         for workflow_rank, (ops, support) in enumerate(selected_workflows, start=1):
-            workflow_id = f'{domain}_wf_{kept_family_idx:02d}_{workflow_rank:02d}'
+            recipe_id = f'{domain}_recipe_{kept_family_idx:02d}_{workflow_rank:02d}'
             workflow_rows.append(
                 {
                     'domain': domain,
                     'family_id': family_id,
-                    'workflow_id': workflow_id,
+                    'recipe_id': recipe_id,
                     'operators': ' | '.join(ops),
                     'length': len(ops),
                     'support': support,
@@ -280,9 +280,9 @@ def _build_domain_report(
                     'selection_source': 'bottom_up_exact_signature',
                 }
             )
-            yaml_workflows.append(
+            yaml_recipes.append(
                 {
-                    'workflow_id': workflow_id,
+                    'recipe_id': recipe_id,
                     'operator_set': list(ops),
                     'length': len(ops),
                     'support': support,
@@ -300,7 +300,7 @@ def _build_domain_report(
                 'subset_support': kept_family['subset_support'],
                 'family_support': kept_family['family_support'],
                 'family_support_ratio': round(kept_family['family_support'] / num_records, 6) if num_records else 0.0,
-                'concrete_workflows': yaml_workflows,
+                'concrete_recipes': yaml_recipes,
             }
         )
 
@@ -316,7 +316,7 @@ def _build_domain_report(
             {
                 'domain': domain,
                 'family_id': f'{domain}_fallback_family_01',
-                'workflow_id': f'{domain}_fallback_wf_{rank:02d}',
+                'recipe_id': f'{domain}_fallback_recipe_{rank:02d}',
                 'rank': rank,
                 'operators': ' | '.join(ops),
                 'length': len(ops),
@@ -337,7 +337,7 @@ def _build_domain_report(
         'configured_specific_operators': [op['name'] for op in domain_cfg.get('specific_operators', [])],
         'source_corpora': dict(source_counter),
         'length_distribution': dict(sorted(length_counter.items())),
-        'workflow_families': workflow_yaml_rows,
+        'recipe_families': workflow_yaml_rows,
         'fallback_workflow_candidates': [
             {
                 'operators': row['operators'].split(' | '),
@@ -350,9 +350,9 @@ def _build_domain_report(
         ],
         'notes': [
             'Bottom-up mining is based on active operator sets from tagging outputs.',
-            f'Concrete workflows are only kept if support >= {min_workflow_support}.',
+            f'Concrete recipes are only kept if support >= {min_workflow_support}.',
             'Fallback recipe candidates are reported for inspection but excluded from selected_recipes.csv.',
-            'Concrete workflow candidates still need manual ordering and activation-spec curation.',
+            'Concrete recipe candidates still need manual ordering and activation-spec curation.',
         ],
     }
 

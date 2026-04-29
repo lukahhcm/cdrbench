@@ -178,9 +178,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description='Render appendix LaTeX tables for atomic mapper/filter results by operator.'
     )
-    parser.add_argument('--score-root', default='data/score_runs')
-    parser.add_argument('--mapper-output-path', default='docs/atomic_mapper_results_table.tex')
-    parser.add_argument('--filter-output-path', default='docs/atomic_filter_results_table.tex')
+    parser.add_argument('--score-root', default='data/evaluation/score')
+    parser.add_argument('--mapper-output-path', default='data/evaluation/reports/atomic_mapper_results_table.tex')
+    parser.add_argument('--filter-output-path', default='data/evaluation/reports/atomic_filter_results_table.tex')
     parser.add_argument(
         '--mapper-caption',
         default='Table A1: Atomic mapper results by operator. Each cell reports RS (\\%) for one model on one mapper operator.',

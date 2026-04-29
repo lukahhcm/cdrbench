@@ -48,12 +48,12 @@ TRACKS="atomic_ops"
 
 # If your benchmark files are not stored in this repo's default data/ tree,
 # set them here to absolute paths.
-EVAL_ROOT="${EVAL_ROOT:-data/benchmark_prompts}"
-BENCHMARK_DIR="${BENCHMARK_DIR:-data/benchmark}"
+EVAL_ROOT="${EVAL_ROOT:-data/benchmark}"
+BENCHMARK_DIR="${BENCHMARK_DIR:-}"
 
 # Output roots. The script will create one subdirectory per model slug.
-INFERENCE_ROOT="${INFERENCE_ROOT:-data/inference_runs}"
-SCORE_ROOT="${SCORE_ROOT:-data/score_runs}"
+INFERENCE_ROOT="${INFERENCE_ROOT:-data/evaluation/infer}"
+SCORE_ROOT="${SCORE_ROOT:-data/evaluation/score}"
 
 # Inference behavior.
 PROMPT_VARIANT_INDICES="${PROMPT_VARIANT_INDICES:-all}"
@@ -145,12 +145,14 @@ run_score_for_model() {
   local cmd=(
     ./scripts/score_benchmark_tracks.sh
     --tracks "$TRACKS"
-    --benchmark-dir "$BENCHMARK_DIR"
     --predictions-root "$INFERENCE_ROOT/$model_slug"
     --output-root "$SCORE_ROOT/$model_slug"
     --model "$model_name"
     --progress-every "$PROGRESS_EVERY"
   )
+  if [[ -n "$BENCHMARK_DIR" ]]; then
+    cmd+=(--benchmark-dir "$BENCHMARK_DIR")
+  fi
   if [[ -n "$base_url" ]]; then
     cmd+=(--base-url "$base_url")
   fi

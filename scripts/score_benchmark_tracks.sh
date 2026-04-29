@@ -15,9 +15,9 @@ By default this script targets the two primary tracks:
 This step is metric-only. It does not call the model API.
 
 Options:
-  --benchmark-dir <path>              Benchmark JSONL root. Default: data/benchmark
-  --predictions-root <path>           Inference root. Default: data/inference_runs
-  --output-root <path>                Score output root. Default: data/score_runs
+  --benchmark-dir <path>              Optional fallback benchmark root for non-self-contained predictions. Default: unset
+  --predictions-root <path>           Inference root. Default: data/evaluation/infer
+  --output-root <path>                Score output root. Default: data/evaluation/score
   --tracks <csv>                      Comma-separated tracks. Default: atomic_ops,main
   --model <name>                      Optional model label for reports
   --base-url <url>                    Optional base-url label for reports
@@ -30,14 +30,14 @@ Options:
 
 Examples:
   ./scripts/score_benchmark_tracks.sh \
-    --predictions-root data/inference_runs/gpt54 \
-    --output-root data/score_runs/gpt54 \
+    --predictions-root data/evaluation/infer/gpt54 \
+    --output-root data/evaluation/score/gpt54 \
     --model gpt-5.4
 
   ./scripts/score_benchmark_tracks.sh \
     --tracks atomic_ops,main \
-    --predictions-root data/inference_runs/local_model \
-    --output-root data/score_runs/local_model \
+    --predictions-root data/evaluation/infer/local_model \
+    --output-root data/evaluation/score/local_model \
     --model local-model
 EOF
 }
@@ -51,9 +51,9 @@ if [[ ! -x "$PYTHON_BIN" ]]; then
   PYTHON_BIN="python3"
 fi
 
-BENCHMARK_DIR="data/benchmark"
-PREDICTIONS_ROOT="data/inference_runs"
-OUTPUT_ROOT="data/score_runs"
+BENCHMARK_DIR=""
+PREDICTIONS_ROOT="data/evaluation/infer"
+OUTPUT_ROOT="data/evaluation/score"
 TRACKS_CSV="atomic_ops,main"
 MODEL=""
 BASE_URL=""
@@ -127,13 +127,13 @@ IFS=',' read -r -a TRACKS <<< "$TRACKS_CSV"
 track_benchmark_path() {
   case "$1" in
     atomic_ops)
-      printf '%s\n' "$BENCHMARK_DIR/atomic_ops.jsonl"
+      printf '%s\n' "$BENCHMARK_DIR/atomic_ops/atomic_ops.jsonl"
       ;;
     main)
-      printf '%s\n' "$BENCHMARK_DIR/main.jsonl"
+      printf '%s\n' "$BENCHMARK_DIR/main/main.jsonl"
       ;;
     order_sensitivity)
-      printf '%s\n' "$BENCHMARK_DIR/order_sensitivity.jsonl"
+      printf '%s\n' "$BENCHMARK_DIR/order_sensitivity/order_sensitivity.jsonl"
       ;;
     *)
       echo "Unsupported track: $1" >&2
@@ -143,15 +143,10 @@ track_benchmark_path() {
 }
 
 for track in "${TRACKS[@]}"; do
-  benchmark_path="$(track_benchmark_path "$track")"
   predictions_path="$PREDICTIONS_ROOT/$track/predictions.jsonl"
   output_dir="$OUTPUT_ROOT/$track"
   mkdir -p "$output_dir"
 
-  if [[ ! -f "$benchmark_path" ]]; then
-    echo "Missing benchmark file for track=$track: $benchmark_path" >&2
-    exit 1
-  fi
   if [[ ! -f "$predictions_path" ]]; then
     echo "Missing predictions file for track=$track: $predictions_path" >&2
     exit 1
@@ -160,11 +155,18 @@ for track in "${TRACKS[@]}"; do
   cmd=(
     "$PYTHON_BIN" -m cdrbench.eval.run_benchmark_eval score
     --predictions-path "$predictions_path"
-    --benchmark-path "$benchmark_path"
     --output-dir "$output_dir"
     --prediction-instance-field "$PREDICTION_INSTANCE_FIELD"
     --progress-every "$PROGRESS_EVERY"
   )
+  if [[ -n "$BENCHMARK_DIR" ]]; then
+    benchmark_path="$(track_benchmark_path "$track")"
+    if [[ ! -f "$benchmark_path" ]]; then
+      echo "Missing benchmark file for track=$track: $benchmark_path" >&2
+      exit 1
+    fi
+    cmd+=(--benchmark-path "$benchmark_path")
+  fi
   if [[ -n "$MODEL" ]]; then
     cmd+=(--model "$MODEL")
   fi

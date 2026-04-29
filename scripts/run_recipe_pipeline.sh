@@ -22,9 +22,10 @@ Options:
   --tagged-dir <path>                     Default: data/processed/domain_tags
   --recipe-mining-output-dir <path>       Default: data/processed/recipe_mining
   --recipe-library-output-dir <path>      Default: data/processed/recipe_library
-  --benchmark-output-dir <path>           Default: data/benchmark
-  --prompt-output-root <path>             Default: data/benchmark_prompts
-  --seed-prompt-cache-root <path>         Default: data/benchmark_prompts
+  --benchmark-output-dir <path>           Default: data/processed/benchmark_instances
+  --prompt-output-root <path>             Default: data/processed/prompt_library
+  --seed-prompt-cache-root <path>         Default: data/processed/prompt_library
+  --final-benchmark-root <path>           Default: data/benchmark
   --tracks <csv>                          Default: atomic_ops,main,order_sensitivity
   --prompt-source <llm|template>          Default: llm
   --model <name>                          Prompt-generation model override
@@ -57,9 +58,10 @@ FILTERED_OUTPUT_DIR="data/processed/domain_filtered"
 TAGGED_DIR="data/processed/domain_tags"
 RECIPE_MINING_OUTPUT_DIR="data/processed/recipe_mining"
 RECIPE_LIBRARY_OUTPUT_DIR="data/processed/recipe_library"
-BENCHMARK_OUTPUT_DIR="data/benchmark"
-PROMPT_OUTPUT_ROOT="data/benchmark_prompts"
-SEED_PROMPT_CACHE_ROOT="data/benchmark_prompts"
+BENCHMARK_OUTPUT_DIR="data/processed/benchmark_instances"
+PROMPT_OUTPUT_ROOT="data/processed/prompt_library"
+SEED_PROMPT_CACHE_ROOT="data/processed/prompt_library"
+FINAL_BENCHMARK_ROOT="data/benchmark"
 TRACKS_CSV="atomic_ops,main,order_sensitivity"
 PROMPT_SOURCE="llm"
 SKIP_PROMPT_PIPELINE="false"
@@ -113,6 +115,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --seed-prompt-cache-root)
       SEED_PROMPT_CACHE_ROOT="$2"
+      shift 2
+      ;;
+    --final-benchmark-root)
+      FINAL_BENCHMARK_ROOT="$2"
       shift 2
       ;;
     --tracks)
@@ -249,7 +255,7 @@ echo "[stage 4/5] materialize benchmark instances and deterministic references"
 
 if [[ "$SKIP_PROMPT_PIPELINE" == "true" ]]; then
   echo "[complete] recipe data pipeline finished without prompt generation"
-  echo "[complete] benchmark_dir=$BENCHMARK_OUTPUT_DIR"
+  echo "[complete] benchmark_base_dir=$BENCHMARK_OUTPUT_DIR"
   exit 0
 fi
 
@@ -270,6 +276,7 @@ prompt_cmd=(
   ./scripts/run_prompt_pipeline_all_tracks.sh
   --benchmark-dir "$BENCHMARK_OUTPUT_DIR"
   --output-root "$PROMPT_OUTPUT_ROOT"
+  --benchmark-output-root "$FINAL_BENCHMARK_ROOT"
   --prompt-source "$PROMPT_SOURCE"
   --tracks "$TRACKS_CSV"
   --python-bin "$PYTHON_BIN"
@@ -301,5 +308,6 @@ echo "[complete] recipe pipeline finished"
 echo "[complete] filtered_dir=$FILTERED_OUTPUT_DIR"
 echo "[complete] recipe_mining_dir=$RECIPE_MINING_OUTPUT_DIR"
 echo "[complete] recipe_library_dir=$RECIPE_LIBRARY_OUTPUT_DIR"
-echo "[complete] benchmark_dir=$BENCHMARK_OUTPUT_DIR"
-echo "[complete] prompt_output_root=$PROMPT_OUTPUT_ROOT"
+echo "[complete] benchmark_base_dir=$BENCHMARK_OUTPUT_DIR"
+echo "[complete] prompt_library_root=$PROMPT_OUTPUT_ROOT"
+echo "[complete] final_benchmark_root=$FINAL_BENCHMARK_ROOT"

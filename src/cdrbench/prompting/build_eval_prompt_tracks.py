@@ -48,12 +48,19 @@ def _stable_id(*parts: Any, length: int = 16) -> str:
     return hashlib.sha1(blob.encode('utf-8')).hexdigest()[:length]
 
 
+def _first_present(row: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in row:
+            return row.get(key)
+    return None
+
+
 def _workflow_key(row: dict[str, Any]) -> str:
     operator_sequence = list(row.get('operator_sequence') or ([row['operator']] if row.get('operator') else []))
     return _stable_id(
         row.get('benchmark_track'),
         row.get('domain'),
-        row.get('workflow_type'),
+        _first_present(row, 'recipe_type', 'workflow_type'),
         row.get('order_slot'),
         operator_sequence,
         row.get('filter_params_by_name') or {},
@@ -113,14 +120,14 @@ def _sample_prompt_variants(
 def _eval_row(
     row: dict[str, Any],
     *,
-    workflow_prompt_key: str,
+    recipe_prompt_key: str,
     candidates: list[dict[str, Any]],
     prompt_variants_per_sample: int,
     prompt_sampling_seed: int,
 ) -> dict[str, Any]:
     prompt_variants = _sample_prompt_variants(
         candidates,
-        workflow_prompt_key=workflow_prompt_key,
+        workflow_prompt_key=recipe_prompt_key,
         instance_id=str(row.get('instance_id') or ''),
         sample_count=prompt_variants_per_sample,
         sample_seed=prompt_sampling_seed,
@@ -130,9 +137,6 @@ def _eval_row(
         'benchmark_track',
         'domain',
         'source_domain',
-        'workflow_id',
-        'workflow_variant_id',
-        'workflow_type',
         'order_family_id',
         'order_slot',
         'order_group_instance_id',
@@ -146,10 +150,15 @@ def _eval_row(
         'reference_status',
         'reference_text',
     ]
-    output_row = {field: row[field] for field in keep_fields if field in row}
+    output_row = {
+        'recipe_id': _first_present(row, 'recipe_id', 'workflow_id'),
+        'recipe_variant_id': _first_present(row, 'recipe_variant_id', 'workflow_variant_id'),
+        'recipe_type': _first_present(row, 'recipe_type', 'workflow_type'),
+    }
+    output_row.update({field: row[field] for field in keep_fields if field in row})
     output_row.update(
         {
-            'workflow_prompt_key': workflow_prompt_key,
+            'recipe_prompt_key': recipe_prompt_key,
             'prompt_candidate_pool_count': len(candidates),
             'prompt_variant_count': len(prompt_variants),
             'prompt_sampling_policy': 'deterministic_distinct_styles_without_replacement',
@@ -162,9 +171,9 @@ def _eval_row(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='Build eval-ready prompt track files from an accepted recipe prompt library.')
-    parser.add_argument('--benchmark-dir', default='data/benchmark')
-    parser.add_argument('--prompt-library', default='data/benchmark_prompts/recipe_prompt_library.jsonl')
-    parser.add_argument('--output-dir', default='data/benchmark_prompts/eval')
+    parser.add_argument('--benchmark-dir', default='data/processed/benchmark_instances')
+    parser.add_argument('--prompt-library', default='data/processed/prompt_library/recipe_prompt_library.jsonl')
+    parser.add_argument('--output-dir', default='data/benchmark')
     parser.add_argument('--tracks', nargs='*', default=list(TRACK_FILES), choices=sorted(TRACK_FILES))
     parser.add_argument('--prompt-variants-per-sample', type=int, default=3)
     parser.add_argument('--prompt-sampling-seed', type=int, default=0)
@@ -183,9 +192,9 @@ def main() -> None:
 
     library_rows = _read_jsonl(prompt_library_path)
     library_by_key = {
-        str(row.get('workflow_prompt_key')): list(row.get('candidates') or [])
+        str(_first_present(row, 'recipe_prompt_key', 'workflow_prompt_key')): list(row.get('candidates') or [])
         for row in library_rows
-        if row.get('workflow_prompt_key')
+        if _first_present(row, 'recipe_prompt_key', 'workflow_prompt_key')
     }
 
     summary_rows = []
@@ -201,8 +210,8 @@ def main() -> None:
         insufficient_style_rows = 0
         print(f'start eval track={track} input_rows={total_rows}', flush=True)
         for row_index, row in enumerate(rows, start=1):
-            workflow_prompt_key = _workflow_key(row)
-            candidates = list(library_by_key.get(workflow_prompt_key) or [])
+            recipe_prompt_key = _workflow_key(row)
+            candidates = list(library_by_key.get(recipe_prompt_key) or [])
             if not candidates:
                 missing_pool_rows += 1
                 if row_index % EVAL_PROGRESS_EVERY == 0 or row_index == total_rows:
@@ -227,7 +236,7 @@ def main() -> None:
             output_rows.append(
                 _eval_row(
                     row,
-                    workflow_prompt_key=workflow_prompt_key,
+                    recipe_prompt_key=recipe_prompt_key,
                     candidates=candidates,
                     prompt_variants_per_sample=args.prompt_variants_per_sample,
                     prompt_sampling_seed=args.prompt_sampling_seed,

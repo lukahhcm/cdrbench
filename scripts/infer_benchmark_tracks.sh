@@ -15,8 +15,8 @@ By default this script targets the two primary tracks:
 It stores raw model outputs so metrics can be recomputed later without rerunning inference.
 
 Options:
-  --eval-root <path>                   Prompt-eval root. Default: data/benchmark_prompts
-  --output-root <path>                 Output root. Default: data/inference_runs
+  --eval-root <path>                   Final self-contained benchmark root. Default: data/benchmark
+  --output-root <path>                 Output root. Default: data/evaluation/infer
   --tracks <csv>                       Comma-separated tracks. Default: atomic_ops,main
   --model <name>                       API model name. Required
   --base-url <url>                     OpenAI-compatible API base URL
@@ -34,13 +34,13 @@ Examples:
   ./scripts/infer_benchmark_tracks.sh \
     --model gpt-5.4 \
     --base-url http://123.57.212.178:3333/v1 \
-    --output-root data/inference_runs/gpt54
+    --output-root data/evaluation/infer/gpt54
 
   ./scripts/infer_benchmark_tracks.sh \
     --model local-model \
     --base-url http://127.0.0.1:8000/v1 \
     --api-key EMPTY \
-    --output-root data/inference_runs/local_model \
+    --output-root data/evaluation/infer/local_model \
     --resume
 EOF
 }
@@ -54,8 +54,8 @@ if [[ ! -x "$PYTHON_BIN" ]]; then
   PYTHON_BIN="python3"
 fi
 
-EVAL_ROOT="data/benchmark_prompts"
-OUTPUT_ROOT="data/inference_runs"
+EVAL_ROOT="data/benchmark"
+OUTPUT_ROOT="data/evaluation/infer"
 TRACKS_CSV="atomic_ops,main"
 MODEL=""
 BASE_URL=""
@@ -145,13 +145,13 @@ IFS=',' read -r -a TRACKS <<< "$TRACKS_CSV"
 track_eval_path() {
   case "$1" in
     atomic_ops)
-      printf '%s\n' "$EVAL_ROOT/atomic_ops/eval/atomic_ops.jsonl"
+      printf '%s\n' "$EVAL_ROOT/atomic_ops/atomic_ops.jsonl"
       ;;
     main)
-      printf '%s\n' "$EVAL_ROOT/main/eval/main.jsonl"
+      printf '%s\n' "$EVAL_ROOT/main/main.jsonl"
       ;;
     order_sensitivity)
-      printf '%s\n' "$EVAL_ROOT/order_sensitivity/eval/order_sensitivity.jsonl"
+      printf '%s\n' "$EVAL_ROOT/order_sensitivity/order_sensitivity.jsonl"
       ;;
     *)
       echo "Unsupported track: $1" >&2

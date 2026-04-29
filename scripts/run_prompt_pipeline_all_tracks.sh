@@ -18,8 +18,9 @@ For each track it will:
   4. check the eval output summary
 
 Options:
-  --benchmark-dir <path>                  Benchmark JSONL directory. Default: data/benchmark
-  --output-root <path>                    Root output directory. Default: data/benchmark_prompts
+  --benchmark-dir <path>                  Base benchmark-instance directory. Default: data/processed/benchmark_instances
+  --output-root <path>                    Prompt-library root. Default: data/processed/prompt_library
+  --benchmark-output-root <path>          Final self-contained benchmark root. Default: data/benchmark
   --prompt-config <path>                  Prompt config YAML. Default: configs/workflow_prompting.yaml
   --prompt-source <llm|template>          Prompt source. Default: llm
   --variants-per-recipe <int>             Style presets requested per recipe. Default: 11
@@ -52,8 +53,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
-BENCHMARK_DIR="data/benchmark"
-OUTPUT_ROOT="data/benchmark_prompts"
+BENCHMARK_DIR="data/processed/benchmark_instances"
+OUTPUT_ROOT="data/processed/prompt_library"
+BENCHMARK_OUTPUT_ROOT="data/benchmark"
 PROMPT_CONFIG="configs/workflow_prompting.yaml"
 PROMPT_SOURCE="llm"
 VARIANTS_PER_RECIPE=11
@@ -84,6 +86,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --output-root)
       OUTPUT_ROOT="$2"
+      shift 2
+      ;;
+    --benchmark-output-root)
+      BENCHMARK_OUTPUT_ROOT="$2"
       shift 2
       ;;
     --prompt-config)
@@ -268,7 +274,7 @@ run_track() {
   local track_output_dir="$OUTPUT_ROOT/$track"
   local cache_path="$track_output_dir/recipe_prompt_library_cache.jsonl"
   local library_path="$track_output_dir/recipe_prompt_library.jsonl"
-  local eval_output_dir="$track_output_dir/eval"
+  local eval_output_dir="$BENCHMARK_OUTPUT_ROOT/$track"
 
   mkdir -p "$track_output_dir" "$eval_output_dir"
 
@@ -324,7 +330,7 @@ run_track() {
   "${build_cmd[@]}"
 
   check_eval_summary "$eval_output_dir/prompt_eval_build_summary.jsonl" "$track"
-  echo "[done] track=$track library=$library_path eval_dir=$eval_output_dir"
+  echo "[done] track=$track library=$library_path benchmark_dir=$eval_output_dir"
 }
 
 for track in "${TRACKS[@]}"; do
@@ -340,4 +346,5 @@ for track in "${TRACKS[@]}"; do
 done
 
 echo "[complete] prompt pipeline finished for tracks: ${TRACKS[*]}"
-echo "[complete] outputs rooted at: $OUTPUT_ROOT"
+echo "[complete] prompt_library_root=$OUTPUT_ROOT"
+echo "[complete] benchmark_root=$BENCHMARK_OUTPUT_ROOT"

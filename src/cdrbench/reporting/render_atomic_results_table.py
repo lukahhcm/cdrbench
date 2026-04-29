@@ -107,10 +107,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description='Render a LaTeX table summarizing atomic benchmark results from paper_metrics.json files.'
     )
-    parser.add_argument('--score-root', default='data/score_runs', help='Root directory containing per-run score outputs.')
+    parser.add_argument('--score-root', default='data/evaluation/score', help='Root directory containing per-run score outputs.')
     parser.add_argument(
         '--output-path',
-        default='docs/atomic_results_table.tex',
+        default='data/evaluation/reports/atomic_results_table.tex',
         help='Output LaTeX file path.',
     )
     parser.add_argument(

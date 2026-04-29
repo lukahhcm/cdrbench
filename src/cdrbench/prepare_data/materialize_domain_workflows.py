@@ -68,6 +68,13 @@ def _log(message: str) -> None:
     print(message, flush=True)
 
 
+def _first_present(row: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in row:
+            return row.get(key)
+    return None
+
+
 def iter_jsonl(path: Path) -> Iterable[dict[str, Any]]:
     with path.open('r', encoding='utf-8') as f:
         for lineno, line in enumerate(f, start=1):
@@ -335,32 +342,38 @@ def _load_domain_yaml(domain_out_dir: Path) -> dict[str, Any] | None:
             payload = yaml.safe_load(f)
     except Exception:
         return None
-    return payload if isinstance(payload, dict) and isinstance(payload.get('workflows'), list) else None
+    if not isinstance(payload, dict):
+        return None
+    recipes = payload.get('recipes')
+    workflows = payload.get('workflows')
+    if isinstance(recipes, list) or isinstance(workflows, list):
+        return payload
+    return None
 
 
 def _summary_rows_from_domain_yaml(domain_yaml: dict[str, Any]) -> list[dict[str, Any]]:
     domain = domain_yaml.get('domain')
     rows = []
-    for workflow in domain_yaml.get('workflows', []):
-        if not isinstance(workflow, dict):
+    for recipe in domain_yaml.get('recipes') or domain_yaml.get('workflows', []):
+        if not isinstance(recipe, dict):
             continue
-        main_variants = workflow.get('main_workflow_variants') or []
-        order_variants = workflow.get('order_sensitivity_variants') or []
-        order_families = workflow.get('order_sensitivity_families') or []
+        main_variants = recipe.get('main_recipe_variants') or recipe.get('main_workflow_variants') or []
+        order_variants = recipe.get('order_sensitivity_recipe_variants') or recipe.get('order_sensitivity_variants') or []
+        order_families = recipe.get('order_sensitivity_families') or []
         rows.append(
             {
                 'domain': domain,
-                'workflow_id': workflow.get('workflow_id'),
-                'support': int(workflow.get('support', 0) or 0),
-                'mapper_length': len(workflow.get('ordered_clean_sequence') or []),
+                'recipe_id': _first_present(recipe, 'recipe_id', 'workflow_id'),
+                'support': int(recipe.get('support', 0) or 0),
+                'mapper_length': len(recipe.get('ordered_clean_sequence') or []),
                 'num_main_variants': len(main_variants),
                 'num_order_sensitivity_variants': len(order_variants),
                 'num_order_sensitivity_families': len(order_families),
                 'num_filter_then_clean': sum(
-                    1 for variant in main_variants if variant.get('workflow_type') == 'filter-then-clean'
+                    1 for variant in main_variants if _first_present(variant, 'recipe_type', 'workflow_type') == 'filter-then-clean'
                 ),
                 'num_clean_then_filter': sum(
-                    1 for variant in main_variants if variant.get('workflow_type') == 'clean-then-filter'
+                    1 for variant in main_variants if _first_present(variant, 'recipe_type', 'workflow_type') == 'clean-then-filter'
                 ),
             }
         )
@@ -663,10 +676,10 @@ def _order_variant(
         raise ValueError(f'unknown order-sensitivity slot: {slot}')
 
     return {
-        'workflow_variant_id': f'{order_family_id}__{slot}',
+        'recipe_variant_id': f'{order_family_id}__{slot}',
         'order_family_id': order_family_id,
         'order_slot': slot,
-        'workflow_type': workflow_type,
+        'recipe_type': workflow_type,
         'benchmark_track': 'order_sensitivity',
         'operator_sequence': operator_sequence,
         'filter_name': attachment['filter_name'],
@@ -688,8 +701,8 @@ def _materialize_variants(
     mapper_names = [variant['name'] for variant in ordered_mappers]
     main_variants = [
         {
-            'workflow_variant_id': f'{workflow_id}__clean_only',
-            'workflow_type': 'clean-only',
+            'recipe_variant_id': f'{workflow_id}__clean_only',
+            'recipe_type': 'clean-only',
             'benchmark_track': 'main',
             'operator_sequence': mapper_names,
             'filter_name': None,
@@ -702,8 +715,8 @@ def _materialize_variants(
     for idx, attachment in enumerate(raw_attachments, start=1):
         main_variants.append(
             {
-                'workflow_variant_id': f'{workflow_id}__filter_then_clean_{idx:02d}',
-                'workflow_type': 'filter-then-clean',
+                'recipe_variant_id': f'{workflow_id}__filter_then_clean_{idx:02d}',
+                'recipe_type': 'filter-then-clean',
                 'benchmark_track': 'main',
                 'operator_sequence': [attachment['filter_name'], *mapper_names],
                 'filter_name': attachment['filter_name'],
@@ -717,8 +730,8 @@ def _materialize_variants(
     for idx, attachment in enumerate(final_attachments, start=1):
         main_variants.append(
             {
-                'workflow_variant_id': f'{workflow_id}__clean_then_filter_{idx:02d}',
-                'workflow_type': 'clean-then-filter',
+                'recipe_variant_id': f'{workflow_id}__clean_then_filter_{idx:02d}',
+                'recipe_type': 'clean-then-filter',
                 'benchmark_track': 'main',
                 'operator_sequence': [*mapper_names, attachment['filter_name']],
                 'filter_name': attachment['filter_name'],
@@ -806,26 +819,26 @@ def main() -> None:
                 continue
             _log(f'[{domain_index}/{len(domain_dirs)}] {domain}: resume found outputs but yaml is unreadable; recomputing')
 
-        workflow_rows = _workflow_rows_for_domain(domain_dir)
-        if not workflow_rows:
+        recipe_rows = _workflow_rows_for_domain(domain_dir)
+        if not recipe_rows:
             _log(f'[{domain_index}/{len(domain_dirs)}] {domain}: no selected_recipes.csv rows; skip')
             continue
 
         domain_records = records_by_domain.get(domain, [])
         _log(
             f'[{domain_index}/{len(domain_dirs)}] {domain}: materializing '
-            f'{len(workflow_rows)} workflows using {len(domain_records)} domain records'
+            f'{len(recipe_rows)} recipes using {len(domain_records)} domain records'
         )
         ordered_filter_variants = _domain_filter_variants(domain, plan)
-        domain_yaml = {'domain': domain, 'workflows': []}
+        domain_yaml = {'domain': domain, 'recipes': []}
         attachment_rows: list[dict[str, Any]] = []
         checkpoint_rows: list[dict[str, Any]] = []
         order_candidate_rows: list[dict[str, Any]] = []
         order_family_rows: list[dict[str, Any]] = []
         variant_rows: list[dict[str, Any]] = []
 
-        for workflow_index, row in enumerate(workflow_rows, start=1):
-            workflow_id = _clean_optional_id(row.get('workflow_id')) or f'{domain}_wf_auto_{workflow_index:03d}'
+        for workflow_index, row in enumerate(recipe_rows, start=1):
+            recipe_id = _clean_optional_id(_first_present(row, 'recipe_id', 'workflow_id')) or f'{domain}_recipe_auto_{workflow_index:03d}'
             operator_set = _parse_operator_set(str(row['operators']))
             ordered_mappers = _ordered_mapper_sequence(domain, operator_set, plan)
             support_records = _supporting_records(
@@ -834,7 +847,7 @@ def main() -> None:
                 max_records=args.max_support_records,
             )
             _log(
-                f'  [{workflow_index}/{len(workflow_rows)}] {domain}/{workflow_id}: '
+                f'  [{workflow_index}/{len(recipe_rows)}] {domain}/{recipe_id}: '
                 f'{len(ordered_mappers)} clean ops, {len(support_records)} support records'
             )
             filter_checkpoint_rows, attachment_candidates = _collect_checkpoint_filter_stats(
@@ -858,14 +871,14 @@ def main() -> None:
                 max_filters_per_workflow=args.max_filters_per_workflow,
             )
             order_families = _select_order_sensitivity_families(
-                workflow_id,
+                recipe_id,
                 attachment_candidates,
                 final_step_index=final_step_index,
                 min_filter_support=args.min_filter_support,
                 max_families_per_workflow=args.max_filters_per_workflow,
             )
             main_variants, order_variants, materialized_order_families = _materialize_variants(
-                workflow_id,
+                recipe_id,
                 ordered_mappers,
                 raw_attachments=raw_attachments,
                 final_attachments=final_attachments,
@@ -884,7 +897,7 @@ def main() -> None:
                 checkpoint_rows.append(
                     {
                         'domain': domain,
-                        'workflow_id': workflow_id,
+                        'recipe_id': recipe_id,
                         'mapper_sequence': mapper_sequence,
                         **checkpoint_row,
                     }
@@ -894,12 +907,12 @@ def main() -> None:
                 *[(attachment, 'filter-then-clean', 'main') for attachment in raw_attachments],
                 *[(attachment, 'clean-then-filter', 'main') for attachment in final_attachments],
             ]
-            for attachment, workflow_type, benchmark_track in selected_attachments:
+            for attachment, recipe_type, benchmark_track in selected_attachments:
                 attachment_row = {
                     'domain': domain,
-                    'workflow_id': workflow_id,
+                    'recipe_id': recipe_id,
                     'mapper_sequence': mapper_sequence,
-                    'workflow_type': workflow_type,
+                    'recipe_type': recipe_type,
                     'benchmark_track': benchmark_track,
                     **{k: v for k, v in attachment.items() if k != 'selection_score'},
                 }
@@ -912,9 +925,9 @@ def main() -> None:
                 variant_rows.append(
                     {
                         'domain': domain,
-                        'workflow_id': workflow_id,
-                        'workflow_variant_id': variant['workflow_variant_id'],
-                        'workflow_type': variant['workflow_type'],
+                        'recipe_id': recipe_id,
+                        'recipe_variant_id': _first_present(variant, 'recipe_variant_id', 'workflow_variant_id'),
+                        'recipe_type': _first_present(variant, 'recipe_type', 'workflow_type'),
                         'benchmark_track': variant['benchmark_track'],
                         'order_family_id': variant.get('order_family_id'),
                         'order_slot': variant.get('order_slot'),
@@ -932,26 +945,26 @@ def main() -> None:
                 order_family_rows.append(
                     {
                         'domain': domain,
-                        'workflow_id': workflow_id,
+                        'recipe_id': recipe_id,
                         'order_family_id': family['order_family_id'],
                         'filter_name': family['filter_name'],
                         'min_support_records': family['min_support_records'],
                         'required_slots_for_group_success': 'front | middle | end',
                         'group_success_rule': family['group_success_rule'],
-                        'front_variant_id': variants_by_slot['front']['workflow_variant_id'],
-                        'middle_variant_id': variants_by_slot['middle']['workflow_variant_id'],
-                        'end_variant_id': variants_by_slot['end']['workflow_variant_id'],
+                        'front_recipe_variant_id': _first_present(variants_by_slot['front'], 'recipe_variant_id', 'workflow_variant_id'),
+                        'middle_recipe_variant_id': _first_present(variants_by_slot['middle'], 'recipe_variant_id', 'workflow_variant_id'),
+                        'end_recipe_variant_id': _first_present(variants_by_slot['end'], 'recipe_variant_id', 'workflow_variant_id'),
                     }
                 )
                 for variant in family['variants']:
                     order_candidate_rows.append(
                         {
                             'domain': domain,
-                            'workflow_id': workflow_id,
+                            'recipe_id': recipe_id,
                             'order_family_id': family['order_family_id'],
-                            'workflow_variant_id': variant['workflow_variant_id'],
+                            'recipe_variant_id': _first_present(variant, 'recipe_variant_id', 'workflow_variant_id'),
                             'order_slot': variant['order_slot'],
-                            'workflow_type': variant['workflow_type'],
+                            'recipe_type': _first_present(variant, 'recipe_type', 'workflow_type'),
                             'operator_sequence': ' -> '.join(variant['operator_sequence']),
                             'length': len(variant['operator_sequence']),
                             'mapper_sequence': mapper_sequence,
@@ -963,9 +976,9 @@ def main() -> None:
                         }
                     )
 
-            domain_yaml['workflows'].append(
+            domain_yaml['recipes'].append(
                 {
-                    'workflow_id': workflow_id,
+                    'recipe_id': recipe_id,
                     'family_id': _clean_optional_id(row.get('family_id')) or f'{domain}_auto_family',
                     'selection_source': row.get('selection_source', 'bottom_up_exact_signature'),
                     'support': int(row.get('support', 0) or 0),
@@ -973,22 +986,22 @@ def main() -> None:
                     'mapper_operator_set': operator_set,
                     'ordered_clean_sequence': [variant['name'] for variant in ordered_mappers],
                     'support_records_used_for_filter_scan': len(support_records),
-                    'main_workflow_variants': main_variants,
-                    'order_sensitivity_variants': order_variants,
+                    'main_recipe_variants': main_variants,
+                    'order_sensitivity_recipe_variants': order_variants,
                     'order_sensitivity_families': materialized_order_families,
                     'selected_filter_attachments': {
                         'filter_then_clean': raw_attachments,
                         'clean_then_filter': final_attachments,
                     },
                     'checkpoint_filter_stats_file': 'checkpoint_filter_stats.csv',
-                    'curation_status': 'draft_workflow_ready_for_threshold_and_prompt_curation',
+                    'curation_status': 'draft_recipe_ready_for_threshold_and_prompt_curation',
                 }
             )
 
             summary_rows.append(
                 {
                     'domain': domain,
-                    'workflow_id': workflow_id,
+                    'recipe_id': recipe_id,
                     'support': int(row.get('support', 0) or 0),
                     'mapper_length': len(ordered_mappers),
                     'num_main_variants': len(main_variants),

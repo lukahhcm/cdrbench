@@ -34,6 +34,13 @@ def _log(message: str) -> None:
     print(message, flush=True)
 
 
+def _first_present(row: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in row:
+            return row.get(key)
+    return None
+
+
 def _stable_json(payload: Any) -> str:
     return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
 
@@ -361,7 +368,7 @@ def _variant_record(
     execution: dict[str, Any],
     threshold_meta: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    instance_id = _stable_id(base.get('workflow_variant_id'), _record_id(record))
+    instance_id = _stable_id(_first_present(base, 'recipe_variant_id', 'workflow_variant_id'), _record_id(record))
     input_text = str(record.get('text', ''))
     return {
         'instance_id': instance_id,
@@ -696,16 +703,16 @@ def _materialize_main_variant(
         records,
         mapper_names,
         args.max_candidate_records,
-        variant['workflow_variant_id'],
+        _first_present(variant, 'recipe_variant_id', 'workflow_variant_id'),
         args.max_input_chars,
         source_usage_counts,
     )
     base = {
         'benchmark_track': 'main',
         'domain': domain,
-        'workflow_id': workflow['workflow_id'],
-        'workflow_variant_id': variant['workflow_variant_id'],
-        'workflow_type': variant['workflow_type'],
+        'recipe_id': _first_present(workflow, 'recipe_id', 'workflow_id'),
+        'recipe_variant_id': _first_present(variant, 'recipe_variant_id', 'workflow_variant_id'),
+        'recipe_type': _first_present(variant, 'recipe_type', 'workflow_type'),
         'order_family_id': None,
         'order_slot': None,
     }
@@ -795,7 +802,7 @@ def _materialize_main_variant(
         drop_rows,
         args.max_instances_per_variant,
         args.target_drop_rate,
-        f"{variant['workflow_variant_id']}:select",
+        f"{_first_present(variant, 'recipe_variant_id', 'workflow_variant_id')}:select",
         source_usage_counts,
     )
     has_min_balance = len(keep_rows) >= args.min_keep and len(drop_rows) >= args.min_drop
@@ -830,7 +837,7 @@ def _materialize_order_family(
     if set(variants_by_slot) != {'front', 'middle', 'end'}:
         return [], {
             'domain': domain,
-            'workflow_id': workflow['workflow_id'],
+            'recipe_id': _first_present(workflow, 'recipe_id', 'workflow_id'),
             'order_family_id': family.get('order_family_id'),
             'status': 'skipped_missing_slots',
             'selected_group_count': 0,
@@ -887,7 +894,7 @@ def _materialize_order_family(
     if threshold_meta.get('zero_ratio_threshold') and args.zero_ratio_threshold_policy == 'skip':
         return [], {
             'domain': domain,
-            'workflow_id': workflow['workflow_id'],
+            'recipe_id': _first_present(workflow, 'recipe_id', 'workflow_id'),
             'order_family_id': family.get('order_family_id'),
             'filter_name': filter_name,
             'status': 'skipped_zero_ratio_threshold',
@@ -917,9 +924,9 @@ def _materialize_order_family(
                 base = {
                     'benchmark_track': 'order_sensitivity',
                     'domain': domain,
-                    'workflow_id': workflow['workflow_id'],
-                    'workflow_variant_id': variant['workflow_variant_id'],
-                    'workflow_type': variant['workflow_type'],
+                    'recipe_id': _first_present(workflow, 'recipe_id', 'workflow_id'),
+                    'recipe_variant_id': _first_present(variant, 'recipe_variant_id', 'workflow_variant_id'),
+                    'recipe_type': _first_present(variant, 'recipe_type', 'workflow_type'),
                     'order_family_id': family['order_family_id'],
                     'order_slot': slot,
                     'order_group_instance_id': _stable_id(family['order_family_id'], _record_id(record)),
@@ -940,7 +947,7 @@ def _materialize_order_family(
     enough_groups = sensitive_group_count >= args.min_order_sensitive_groups
     return selected_rows if enough_groups else [], {
         'domain': domain,
-        'workflow_id': workflow['workflow_id'],
+        'recipe_id': _first_present(workflow, 'recipe_id', 'workflow_id'),
         'order_family_id': family['order_family_id'],
         'filter_name': filter_name,
         'status': 'kept' if enough_groups else 'skipped_not_order_sensitive_enough',
@@ -959,9 +966,9 @@ def _materialize_order_family(
 def main() -> None:
     parser = argparse.ArgumentParser(description='Materialize benchmark instances and deterministic references without prompts.')
     parser.add_argument('--domains-config', default='configs/domains.yaml')
-    parser.add_argument('--workflow-library-dir', default='data/processed/recipe_library')
+    parser.add_argument('--recipe-library-dir', '--workflow-library-dir', dest='recipe_library_dir', default='data/processed/recipe_library')
     parser.add_argument('--filtered-path', default='data/processed/domain_filtered/all.jsonl')
-    parser.add_argument('--output-dir', default='data/benchmark')
+    parser.add_argument('--output-dir', default='data/processed/benchmark_instances')
     parser.add_argument('--max-candidate-records', type=int, default=0, help='Candidate cap per workflow/order family; 0 means no cap.')
     parser.add_argument('--max-instances-per-variant', type=int, default=20)
     parser.add_argument('--max-order-groups-per-family', type=int, default=10)
@@ -1000,7 +1007,7 @@ def main() -> None:
     args = parser.parse_args()
 
     root = ROOT
-    workflow_library_dir = (root / args.workflow_library_dir).resolve()
+    workflow_library_dir = (root / args.recipe_library_dir).resolve()
     filtered_path = (root / args.filtered_path).resolve()
     output_dir = (root / args.output_dir).resolve()
     cache_dir = output_dir / '_materialize_cache_v2'
@@ -1064,19 +1071,19 @@ def main() -> None:
             _write_cache(cache_dir, 'atomic', 'atomic_ops', atomic_rows, atomic_summary_rows)
 
     for domain_index, (domain, domain_yaml) in enumerate(sorted(domain_workflows.items()), start=1):
-        workflows = list(domain_yaml.get('workflows') or [])
+        workflows = list(domain_yaml.get('recipes') or domain_yaml.get('workflows') or [])
         records = records_by_domain.get(domain, [])
-        _log(f'[{domain_index}/{len(domain_workflows)}] {domain}: {len(workflows)} workflows, {len(records)} records')
+        _log(f'[{domain_index}/{len(domain_workflows)}] {domain}: {len(workflows)} recipes, {len(records)} records')
         for workflow_index, workflow in enumerate(workflows, start=1):
-            workflow_id = workflow['workflow_id']
-            main_variants = list(workflow.get('main_workflow_variants') or [])
+            workflow_id = _first_present(workflow, 'recipe_id', 'workflow_id')
+            main_variants = list(workflow.get('main_recipe_variants') or workflow.get('main_workflow_variants') or [])
             order_families = list(workflow.get('order_sensitivity_families') or [])
             _log(
                 f'  [{workflow_index}/{len(workflows)}] {domain}/{workflow_id}: '
                 f'{len(main_variants)} main variants, {len(order_families)} order families'
             )
             for variant in main_variants:
-                variant_id = variant['workflow_variant_id']
+                variant_id = _first_present(variant, 'recipe_variant_id', 'workflow_variant_id')
                 cached = _load_cache(cache_dir, 'main', variant_id) if args.resume else None
                 if cached is not None:
                     rows, summary = cached

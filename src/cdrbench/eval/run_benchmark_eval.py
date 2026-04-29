@@ -13,7 +13,7 @@ from urllib.parse import urlparse
 
 import yaml
 
-from cdrbench.eval.metrics import compute_workflow_metrics
+from cdrbench.eval.metrics import compute_recipe_metrics
 from cdrbench.llm_utils import build_client, parse_json_response, resolve_api_key, resolve_base_url, resolve_model
 
 
@@ -85,6 +85,21 @@ def _load_yaml(path: Path) -> dict[str, Any]:
     with path.open('r', encoding='utf-8') as f:
         payload = yaml.safe_load(f)
     return payload if isinstance(payload, dict) else {}
+
+
+def _first_present(row: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in row:
+            return row.get(key)
+    return None
+
+
+def _copy_recipe_identity_fields(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        'recipe_id': _first_present(row, 'recipe_id', 'workflow_id'),
+        'recipe_variant_id': _first_present(row, 'recipe_variant_id', 'workflow_variant_id'),
+        'recipe_type': _first_present(row, 'recipe_type', 'workflow_type'),
+    }
 
 
 def _infer_local_api_key(base_url: str) -> str:
@@ -282,9 +297,6 @@ def _base_score_row(
         'benchmark_track',
         'domain',
         'source_domain',
-        'workflow_id',
-        'workflow_variant_id',
-        'workflow_type',
         'order_family_id',
         'order_slot',
         'order_group_instance_id',
@@ -298,11 +310,12 @@ def _base_score_row(
         'reference_status',
         'reference_text',
     ]
-    output_row = {field: benchmark_row[field] for field in keep_fields if field in benchmark_row}
+    output_row = _copy_recipe_identity_fields(benchmark_row)
+    output_row.update({field: benchmark_row[field] for field in keep_fields if field in benchmark_row})
     output_row['predicted_status'] = predicted_status
     output_row['predicted_clean_text'] = predicted_clean_text
     output_row.update(
-        compute_workflow_metrics(
+        compute_recipe_metrics(
             input_text=benchmark_row.get('input_text', ''),
             reference_status=benchmark_row.get('reference_status', ''),
             reference_text=benchmark_row.get('reference_text', ''),
@@ -319,9 +332,6 @@ def _base_inference_row(eval_row: dict[str, Any]) -> dict[str, Any]:
         'benchmark_track',
         'domain',
         'source_domain',
-        'workflow_id',
-        'workflow_variant_id',
-        'workflow_type',
         'order_family_id',
         'order_slot',
         'order_group_instance_id',
@@ -334,13 +344,17 @@ def _base_inference_row(eval_row: dict[str, Any]) -> dict[str, Any]:
         'input_length_bucket',
         'reference_status',
         'reference_text',
-        'workflow_prompt_key',
         'prompt_variant_count',
         'prompt_candidate_pool_count',
         'prompt_sampling_policy',
         'prompt_sampling_seed',
     ]
-    return {field: eval_row[field] for field in keep_fields if field in eval_row}
+    output_row = _copy_recipe_identity_fields(eval_row)
+    output_row.update({field: eval_row[field] for field in keep_fields if field in eval_row})
+    recipe_prompt_key = _first_present(eval_row, 'recipe_prompt_key', 'workflow_prompt_key')
+    if recipe_prompt_key is not None:
+        output_row['recipe_prompt_key'] = recipe_prompt_key
+    return output_row
 
 
 def _normalize_variant_predictions(row: dict[str, Any]) -> list[dict[str, Any]]:
@@ -481,7 +495,6 @@ def _build_summary(
         'avg_edit_distance_prediction_to_reference': _safe_mean(pred_distances),
         'num_order_groups': len(order_groups),
         'order_consistent_success_rate': _rate(order_groups, 'order_consistent_success') if order_groups else 0.0,
-        'workflow_success_rate': _rate(rows, 'recipe_success'),
         'order_group_success_rate': _rate(order_groups, 'order_consistent_success') if order_groups else 0.0,
         'by_operator': _slice_summary(rows, 'operator'),
         'by_domain': _slice_summary(rows, 'domain'),
@@ -1040,7 +1053,7 @@ def main() -> None:
     subparsers = parser.add_subparsers(dest='command', required=True)
 
     predict_parser = subparsers.add_parser('predict', help='Call an OpenAI-compatible API on eval-ready JSONL and save raw predictions.')
-    predict_parser.add_argument('--eval-path', required=True, help='Eval-ready JSONL, e.g. data/benchmark_prompts/atomic_ops/eval/atomic_ops.jsonl')
+    predict_parser.add_argument('--eval-path', required=True, help='Eval-ready JSONL, e.g. data/benchmark/atomic_ops/atomic_ops.jsonl')
     predict_parser.add_argument('--output-path', required=True, help='Prediction JSONL output path.')
     predict_parser.add_argument('--prompt-config', default=str(DEFAULT_PROMPT_CONFIG.relative_to(ROOT)))
     predict_parser.add_argument('--model', default=None)

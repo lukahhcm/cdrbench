@@ -339,6 +339,18 @@ def _stable_id(*parts: Any, length: int = 16) -> str:
     return hashlib.sha1(blob.encode('utf-8')).hexdigest()[:length]
 
 
+def _first_present(row: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in row:
+            return row.get(key)
+    return None
+
+
+def _recipe_prompt_key(row: dict[str, Any]) -> str:
+    value = _first_present(row, 'recipe_prompt_key', 'workflow_prompt_key')
+    return '' if value is None else str(value)
+
+
 def _find_operator_file(op_name: str, kind: str) -> Path | None:
     path = ROOT / 'data-juicer' / 'data_juicer' / 'ops' / kind / f'{op_name}.py'
     return path if path.exists() else None
@@ -375,7 +387,7 @@ def _workflow_key(row: dict[str, Any]) -> str:
     return _stable_id(
         row.get('benchmark_track'),
         row.get('domain'),
-        row.get('workflow_type'),
+        _first_present(row, 'recipe_type', 'workflow_type'),
         row.get('order_slot'),
         operator_sequence,
         row.get('filter_params_by_name') or {},
@@ -468,10 +480,10 @@ def _workflow_bundle(
             }
         )
     return {
-        'workflow_prompt_key': workflow_key,
+        'recipe_prompt_key': workflow_key,
         'benchmark_track': row.get('benchmark_track'),
         'domain': row.get('domain'),
-        'workflow_type': row.get('workflow_type'),
+        'recipe_type': _first_present(row, 'recipe_type', 'workflow_type'),
         'order_slot': row.get('order_slot'),
         'operator_sequence': operator_sequence,
         'filter_params_by_name': filter_params_by_name,
@@ -505,7 +517,7 @@ def _generation_user_prompt(bundle: dict[str, Any]) -> str:
     return (
         f"Benchmark track: {bundle['benchmark_track']}\n"
         f"Domain: {bundle['domain']}\n"
-        f"Workflow type: {bundle.get('workflow_type')}\n"
+        f"Recipe type: {bundle.get('recipe_type')}\n"
         f"Order slot: {bundle.get('order_slot')}\n"
         f"Internal operator sequence: {' -> '.join(bundle['operator_sequence'])}\n"
         f"Filter params by name: {json.dumps(bundle['filter_params_by_name'], ensure_ascii=False, sort_keys=True)}\n"
@@ -538,7 +550,7 @@ def _judge_user_prompt(entry: dict[str, Any], candidate: dict[str, Any], *, clie
     user_prompt = (
         f"Benchmark track: {entry.get('benchmark_track')}\n"
         f"Domain: {entry.get('domain')}\n"
-        f"Workflow type: {entry.get('workflow_type')}\n"
+        f"Recipe type: {entry.get('recipe_type')}\n"
         f"Order slot: {entry.get('order_slot')}\n"
         f"Internal operator sequence: {' -> '.join(entry.get('operator_sequence') or [])}\n"
         f"Filter params by name: {json.dumps(entry.get('filter_params_by_name') or {}, ensure_ascii=False, sort_keys=True)}\n"
@@ -560,7 +572,7 @@ def _judge_user_prompt(entry: dict[str, Any], candidate: dict[str, Any], *, clie
             user_prompt=user_prompt,
             temperature=temperature,
             request_kind='judge',
-            workflow_key=str(entry.get('workflow_prompt_key') or ''),
+            workflow_key=str(entry.get('recipe_prompt_key') or ''),
             candidate_id=str(candidate.get('candidate_id') or ''),
         )
         last_content = content
@@ -573,14 +585,14 @@ def _judge_user_prompt(entry: dict[str, Any], candidate: dict[str, Any], *, clie
             last_error = exc
             print(
                 f"retry judge JSON parse: attempt={attempt}/{MAX_JSON_RETRIES} "
-                f"workflow={entry.get('workflow_prompt_key')} candidate={candidate.get('candidate_id')} "
+                f"recipe={_recipe_prompt_key(entry)} candidate={candidate.get('candidate_id')} "
                 f"error={exc}",
                 flush=True,
             )
     preview = last_content[:RAW_RESPONSE_PREVIEW_CHARS].replace('\n', '\\n')
     raise RuntimeError(
         f"Judge JSON parse failed after {MAX_JSON_RETRIES} attempts for "
-        f"workflow={entry.get('workflow_prompt_key')} candidate={candidate.get('candidate_id')}. "
+        f"recipe={_recipe_prompt_key(entry)} candidate={candidate.get('candidate_id')}. "
         f"Last error: {last_error}. Raw preview: {preview}"
     ) from last_error
 
@@ -591,7 +603,7 @@ def _cache_key(bundle: dict[str, Any], model: str, judge_model: str, prompt_sour
         judge_model,
         prompt_source,
         min_average_score,
-        bundle['workflow_prompt_key'],
+        bundle['recipe_prompt_key'],
         bundle['style_requests'],
         bundle['operator_sequence'],
         bundle['filter_params_by_name'],
@@ -624,7 +636,7 @@ def _load_cache(path: Path) -> dict[str, dict[str, Any]]:
                 if saw_judge_error and all_judge_error:
                     print(
                         f'skip suspect cache entry with only judge errors: '
-                        f'workflow={entry.get("workflow_prompt_key")} cache_key={key}',
+                        f'recipe={_recipe_prompt_key(entry)} cache_key={key}',
                         flush=True,
                     )
                     continue
@@ -657,7 +669,7 @@ def _call_llm_for_candidates(
             user_prompt=_generation_user_prompt(bundle),
             temperature=temperature,
             request_kind='generation',
-            workflow_key=str(bundle.get('workflow_prompt_key') or ''),
+            workflow_key=str(bundle.get('recipe_prompt_key') or ''),
         )
         last_content = content
         try:
@@ -670,14 +682,14 @@ def _call_llm_for_candidates(
             last_error = exc
             print(
                 f"retry generation JSON parse: attempt={attempt}/{MAX_JSON_RETRIES} "
-                f"workflow={bundle.get('workflow_prompt_key')} error={exc}",
+                f"recipe={_recipe_prompt_key(bundle)} error={exc}",
                 flush=True,
             )
     if payload is None:
         preview = last_content[:RAW_RESPONSE_PREVIEW_CHARS].replace('\n', '\\n')
         raise RuntimeError(
             f"Generation JSON parse failed after {MAX_JSON_RETRIES} attempts for "
-            f"workflow={bundle.get('workflow_prompt_key')}. Last error: {last_error}. Raw preview: {preview}"
+            f"recipe={_recipe_prompt_key(bundle)}. Last error: {last_error}. Raw preview: {preview}"
         ) from last_error
     candidates = []
     seen = set()
@@ -696,7 +708,7 @@ def _call_llm_for_candidates(
         seen.add(dedup_key)
         candidates.append(
             {
-                'candidate_id': _stable_id(bundle['workflow_prompt_key'], request_key, user_requirement),
+                'candidate_id': _stable_id(bundle['recipe_prompt_key'], request_key, user_requirement),
                 'request_key': request_key,
                 'candidate_slot': int(request_meta['candidate_slot']),
                 'style_id': style_id,
@@ -733,7 +745,7 @@ def _template_candidates(bundle: dict[str, Any], prompt_cfg: dict[str, Any]) -> 
             text = f'{scenario} {joined}.'
         candidates.append(
             {
-                'candidate_id': _stable_id(bundle['workflow_prompt_key'], request_meta['request_key'], text),
+                'candidate_id': _stable_id(bundle['recipe_prompt_key'], request_meta['request_key'], text),
                 'request_key': request_meta['request_key'],
                 'candidate_slot': int(request_meta['candidate_slot']),
                 'style_id': request_meta['style_id'],
@@ -767,7 +779,7 @@ def _build_library_entry(
         except Exception as exc:
             print(
                 f"judge failed; rejecting candidate "
-                f"workflow={bundle.get('workflow_prompt_key')} candidate={candidate.get('candidate_id')} error={exc}",
+                f"recipe={_recipe_prompt_key(bundle)} candidate={candidate.get('candidate_id')} error={exc}",
                 flush=True,
             )
             verdict = {
@@ -873,8 +885,8 @@ def _failed_library_entry(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='Generate and judge recipe-level CDR-Bench prompt libraries.')
-    parser.add_argument('--benchmark-dir', default='data/benchmark')
-    parser.add_argument('--output-dir', default='data/benchmark_prompts')
+    parser.add_argument('--benchmark-dir', default='data/processed/benchmark_instances')
+    parser.add_argument('--output-dir', default='data/processed/prompt_library')
     parser.add_argument('--prompt-config', default='configs/workflow_prompting.yaml')
     parser.add_argument('--tracks', nargs='*', default=list(TRACK_FILES), choices=sorted(TRACK_FILES))
     parser.add_argument('--prompt-source', choices=['llm', 'template'], default='llm')
@@ -897,7 +909,7 @@ def main() -> None:
     )
     parser.add_argument(
         '--cache-path',
-        default='data/benchmark_prompts/recipe_prompt_library_cache.jsonl',
+        default='data/processed/prompt_library/recipe_prompt_library_cache.jsonl',
         help='Cache file for recipe-level prompt generation and judging.',
     )
     parser.add_argument(
@@ -993,7 +1005,7 @@ def main() -> None:
                     )
                     cache_row = {
                         'cache_key': cache_key,
-                        'workflow_prompt_key': workflow_key,
+                        'recipe_prompt_key': workflow_key,
                         'library_entry': library_entry,
                     }
                     _append_jsonl(cache_path, cache_row)
@@ -1036,11 +1048,8 @@ def main() -> None:
                 'track': track,
                 'input_rows': len(rows),
                 'skipped_rows': skipped_count,
-                'workflow_count': len(grouped),
-                'accepted_workflow_count': accepted_recipe_count,
                 'recipe_count': len(grouped),
                 'accepted_recipe_count': accepted_recipe_count,
-                'variants_per_workflow': args.variants_per_workflow,
                 'variants_per_recipe': args.variants_per_workflow,
                 'candidates_per_style': args.candidates_per_style,
                 'generated_candidate_count': track_generated_count,
