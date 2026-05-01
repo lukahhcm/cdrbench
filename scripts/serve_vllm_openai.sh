@@ -1,147 +1,62 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-usage() {
-  cat <<'EOF'
-Usage:
-  serve_vllm_openai.sh --model <hf_or_local_path> [options] [-- extra_vllm_args...]
+# vLLM Server Startup Script for CDR-Bench
+# Usage: bash scripts/serve_vllm_openai.sh <model_path> <model_name> [tp_size] [gpu_ids] [port]
+#
+# 此脚本只负责启动 vLLM 服务，不执行测评
+# 测评请单独运行: ./scripts/infer_benchmark_tracks.sh --model <model_name> --base-url <api_base>
 
-Launch a local OpenAI-compatible vLLM server for CDR-Bench evaluation.
+MODEL_PATH="${1:-/mnt/workspace/shared/qwen/Qwen/Qwen3.5-9B}"
+MODEL_NAME="${2:-qwen3_5_9b}"
+TP_SIZE="${3:-1}"
+GPU_IDS="${4:-3}"
+PORT="${5:-8904}"
 
-Options:
-  --model <path_or_name>           Required. HF model id or local model path.
-  --served-model-name <name>       API-visible model name. Default: basename of --model
-  --host <host>                    Default: 0.0.0.0
-  --port <port>                    Default: 8000
-  --api-key <key>                  Default: EMPTY
-  --dtype <dtype>                  Default: auto
-  --tensor-parallel-size <int>     Default: 1
-  --gpu-memory-utilization <float> Default: 0.92
-  --max-model-len <value>          Optional. Example: 32768 or 32k
-  --trust-remote-code              Pass through to vLLM
-  --help                           Show this help
+HOST="${HOST:-0.0.0.0}"
+API_KEY="${API_KEY:-EMPTY}"
+DTYPE="${DTYPE:-auto}"
+MAX_MODEL_LEN="${MAX_MODEL_LEN:-32768}"
+GPU_MEMORY_UTILIZATION="${GPU_MEMORY_UTILIZATION:-0.92}"
+TRUST_REMOTE_CODE="${TRUST_REMOTE_CODE:-true}"
 
-Examples:
-  ./scripts/serve_vllm_openai.sh \
-    --model /models/Qwen2.5-7B-Instruct \
-    --served-model-name qwen2.5-7b-instruct \
-    --tensor-parallel-size 2 \
-    --port 8000
-
-  ./scripts/serve_vllm_openai.sh \
-    --model meta-llama/Llama-3.1-8B-Instruct \
-    --api-key EMPTY \
-    -- --max-num-seqs 32
-EOF
-}
-
-MODEL=""
-SERVED_MODEL_NAME=""
-HOST="0.0.0.0"
-PORT="8000"
-API_KEY="EMPTY"
-DTYPE="auto"
-TENSOR_PARALLEL_SIZE="1"
-GPU_MEMORY_UTILIZATION="0.92"
-MAX_MODEL_LEN=""
-TRUST_REMOTE_CODE="false"
-EXTRA_ARGS=()
-
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --model)
-      MODEL="$2"
-      shift 2
-      ;;
-    --served-model-name)
-      SERVED_MODEL_NAME="$2"
-      shift 2
-      ;;
-    --host)
-      HOST="$2"
-      shift 2
-      ;;
-    --port)
-      PORT="$2"
-      shift 2
-      ;;
-    --api-key)
-      API_KEY="$2"
-      shift 2
-      ;;
-    --dtype)
-      DTYPE="$2"
-      shift 2
-      ;;
-    --tensor-parallel-size)
-      TENSOR_PARALLEL_SIZE="$2"
-      shift 2
-      ;;
-    --gpu-memory-utilization)
-      GPU_MEMORY_UTILIZATION="$2"
-      shift 2
-      ;;
-    --max-model-len)
-      MAX_MODEL_LEN="$2"
-      shift 2
-      ;;
-    --trust-remote-code)
-      TRUST_REMOTE_CODE="true"
-      shift 1
-      ;;
-    --help|-h)
-      usage
-      exit 0
-      ;;
-    --)
-      shift
-      EXTRA_ARGS=("$@")
-      break
-      ;;
-    *)
-      echo "Unknown argument: $1" >&2
-      usage
-      exit 1
-      ;;
-  esac
-done
-
-if [[ -z "$MODEL" ]]; then
-  echo "--model is required." >&2
-  exit 1
-fi
-
-if [[ -z "$SERVED_MODEL_NAME" ]]; then
-  SERVED_MODEL_NAME="$(basename "$MODEL")"
-fi
+export VLLM_USE_MODELSCOPE=True
 
 if ! command -v vllm >/dev/null 2>&1; then
-  echo "vllm command not found. Install vLLM first." >&2
+  echo "❌ vllm command not found. Please install vLLM first."
   exit 1
 fi
 
+echo "=========================================="
+echo "🚀 启动 vLLM 服务"
+echo "   模型路径: ${MODEL_PATH}"
+echo "   模型名称: ${MODEL_NAME}"
+echo "   Tensor Parallel: ${TP_SIZE}"
+echo "   GPU IDs: ${GPU_IDS}"
+echo "   Host: ${HOST}"
+echo "   端口: ${PORT}"
+echo "   API Base: http://${HOST}:${PORT}/v1"
+echo "=========================================="
+echo ""
+echo "💡 提示: 服务启动后，请在另一个终端运行:"
+echo "   ./scripts/infer_benchmark_tracks.sh --model ${MODEL_NAME} --base-url http://127.0.0.1:${PORT}/v1 --api-key EMPTY --eval-root data/benchmark_prompts --output-root data/evaluation/infer/${MODEL_NAME} --resume"
+echo ""
+
 cmd=(
-  vllm serve "$MODEL"
-  --host "$HOST"
-  --port "$PORT"
-  --api-key "$API_KEY"
-  --dtype "$DTYPE"
-  --served-model-name "$SERVED_MODEL_NAME"
-  --tensor-parallel-size "$TENSOR_PARALLEL_SIZE"
-  --gpu-memory-utilization "$GPU_MEMORY_UTILIZATION"
+  vllm serve "${MODEL_PATH}"
+  --host "${HOST}"
+  --port "${PORT}"
+  --api-key "${API_KEY}"
+  --dtype "${DTYPE}"
+  --served-model-name "${MODEL_NAME}"
+  --tensor-parallel-size "${TP_SIZE}"
+  --gpu-memory-utilization "${GPU_MEMORY_UTILIZATION}"
+  --max-model-len "${MAX_MODEL_LEN}"
   --generation-config vllm
 )
 
-if [[ -n "$MAX_MODEL_LEN" ]]; then
-  cmd+=(--max-model-len "$MAX_MODEL_LEN")
-fi
-if [[ "$TRUST_REMOTE_CODE" == "true" ]]; then
+if [[ "${TRUST_REMOTE_CODE}" == "true" ]]; then
   cmd+=(--trust-remote-code)
 fi
-if [[ ${#EXTRA_ARGS[@]} -gt 0 ]]; then
-  cmd+=("${EXTRA_ARGS[@]}")
-fi
 
-printf 'Launching vLLM server for model=%s on %s:%s\n' "$SERVED_MODEL_NAME" "$HOST" "$PORT"
-printf 'API base URL: http://%s:%s/v1\n' "$HOST" "$PORT"
-exec "${cmd[@]}"
+CUDA_VISIBLE_DEVICES="${GPU_IDS}" exec "${cmd[@]}"
