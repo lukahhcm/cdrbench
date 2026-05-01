@@ -32,7 +32,7 @@ Options:
   --prompt-variant-index <int>       Which prompt variant to use. Default: 0
   --max-samples <int>                Optional cap for smoke tests. Default: 0 (all)
   --temperature <float>              Default: 0.0
-  --max-tokens <int>                 Default: 4096
+  --max-tokens <int>                 Default: 0 (use model/server default)
   --resume                           Resume predictions from existing per-track files
   --predict-only                     Only run inference, skip scoring
   --score-only                       Only score existing prediction files
@@ -83,7 +83,7 @@ API_KEY=""
 PROMPT_VARIANT_INDEX="0"
 MAX_SAMPLES="0"
 TEMPERATURE="0.0"
-MAX_TOKENS="4096"
+MAX_TOKENS="0"
 RESUME="false"
 PREDICT_ONLY="false"
 SCORE_ONLY="false"

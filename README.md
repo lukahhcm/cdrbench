@@ -412,11 +412,7 @@ For `atomic_ops` and `main`, the paper-facing metrics are `mean_rs`, `rs_at_k`, 
 To benchmark a local model through the same OpenAI-compatible client path, launch `vllm` first:
 
 ```bash
-./scripts/serve_vllm_openai.sh \
-  --model /path/to/local/model \
-  --served-model-name local-model \
-  --tensor-parallel-size 2 \
-  --port 8000
+bash scripts/serve_vllm_openai.sh /path/to/local/model local-model 2 0,1 8000
 ```
 
 Then run the two-step atomic evaluation against the local server:
@@ -424,7 +420,7 @@ Then run the two-step atomic evaluation against the local server:
 ```bash
 ./scripts/infer_benchmark_tracks.sh \
   --tracks atomic_ops \
-  --eval-root data/benchmark_prompts \
+  --eval-root data/benchmark \
   --model local-model \
   --base-url http://127.0.0.1:8000/v1 \
   --api-key EMPTY \
@@ -439,7 +435,33 @@ Then run the two-step atomic evaluation against the local server:
   --model local-model
 ```
 
-The `vllm` launcher uses `--generation-config vllm` so server-side defaults from a model repo do not silently change benchmark decoding behavior.
+The local launcher intentionally reuses the same `ref`-style startup pattern used in earlier experiments:
+
+```bash
+CUDA_VISIBLE_DEVICES=<gpu_ids> python -m vllm.entrypoints.openai.api_server \
+  --model <model_path> \
+  --served-model-name <model_name> \
+  --trust_remote_code \
+  --tensor-parallel-size <tp_size> \
+  --port <port>
+```
+
+For example, to use GPUs `4,5,6,7`:
+
+```bash
+bash scripts/serve_vllm_openai.sh /path/to/local/model local-model 4 4,5,6,7 8904
+
+./scripts/infer_benchmark_tracks.sh \
+  --tracks atomic_ops,main \
+  --eval-root data/benchmark \
+  --model local-model \
+  --base-url http://127.0.0.1:8904/v1 \
+  --api-key EMPTY \
+  --output-root data/evaluation/infer/local_model \
+  --resume
+```
+
+By default, inference now leaves `max_tokens` unset so the model/server default generation limit is used. The inference logs also print the maximum input length in the current run and emit per-instance request errors, which helps debug models that do not support long-context benchmark rows.
 
 If you want one script with a fixed model suite configured at the top, use:
 

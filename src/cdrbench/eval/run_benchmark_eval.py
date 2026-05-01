@@ -655,6 +655,13 @@ def _track_name_from_path(path: Path) -> str:
     return stem if stem else 'unknown'
 
 
+def _row_input_length_chars(row: dict[str, Any]) -> int:
+    value = row.get('input_length_chars')
+    if isinstance(value, int):
+        return value
+    return len(str(row.get('input_text', '')))
+
+
 def _predict(args: argparse.Namespace) -> None:
     eval_path = (ROOT / args.eval_path).resolve()
     output_path = (ROOT / args.output_path).resolve()
@@ -694,15 +701,30 @@ def _predict(args: argparse.Namespace) -> None:
     started = time.time()
     total_rows = len(rows)
     new_count = 0
+    max_input_length_chars = max((_row_input_length_chars(row) for row in rows), default=0)
+    avg_input_length_chars = (
+        sum(_row_input_length_chars(row) for row in rows) / total_rows if total_rows > 0 else 0.0
+    )
     print(
         f'start predict track={_track_name_from_path(eval_path)} model={model} '
         f'num_rows={total_rows} skipped_input_too_long={skipped_for_input_length} '
         f'progress_every={args.progress_every} resume={bool(args.resume)} '
-        f'max_input_chars={args.max_input_chars}',
+        f'max_input_chars={args.max_input_chars} '
+        f'max_row_input_chars={max_input_length_chars} '
+        f'avg_row_input_chars={avg_input_length_chars:.1f} '
+        f'request_max_tokens={args.max_tokens} '
+        f'base_url={base_url}',
         flush=True,
     )
+    if args.max_tokens <= 0:
+        print(
+            'note predict request_max_tokens=0 -> using model/server default generation limit; '
+            'if the model does not support long context, request errors will be printed below.',
+            flush=True,
+        )
     for index, row in enumerate(rows, start=1):
         instance_id = str(row.get('instance_id') or '')
+        input_length_chars = _row_input_length_chars(row)
         selected_prompt_variant_indices = _parse_prompt_variant_indices(
             args.prompt_variant_indices if args.prompt_variant_indices is not None else str(args.prompt_variant_index),
             row,
@@ -741,8 +763,25 @@ def _predict(args: argparse.Namespace) -> None:
                         break
                 except Exception as exc:  # pragma: no cover - exercised in CLI usage
                     prediction_error = f'request_error: {exc}'
+                    print(
+                        f'warn predict instance_id={instance_id or "UNKNOWN"} '
+                        f'prompt_variant_index={prompt_variant_index} '
+                        f'input_length_chars={input_length_chars} '
+                        f'attempt={attempt}/{args.max_retries + 1} '
+                        f'error={prediction_error}',
+                        flush=True,
+                    )
                 if attempt <= args.max_retries:
                     time.sleep(args.retry_sleep_seconds)
+
+            if prediction_error is not None:
+                print(
+                    f'warn predict failed instance_id={instance_id or "UNKNOWN"} '
+                    f'prompt_variant_index={prompt_variant_index} '
+                    f'input_length_chars={input_length_chars} '
+                    f'final_error={prediction_error}',
+                    flush=True,
+                )
 
             predicted_status = ''
             predicted_clean_text = ''
@@ -1060,7 +1099,7 @@ def main() -> None:
     predict_parser.add_argument('--base-url', default=None)
     predict_parser.add_argument('--api-key', default=None)
     predict_parser.add_argument('--temperature', type=float, default=0.0)
-    predict_parser.add_argument('--max-tokens', type=int, default=4096)
+    predict_parser.add_argument('--max-tokens', type=int, default=0)
     predict_parser.add_argument('--prompt-variant-index', type=int, default=0)
     predict_parser.add_argument(
         '--prompt-variant-indices',

@@ -15,7 +15,7 @@ By default this script targets the two primary tracks:
 It stores raw model outputs so metrics can be recomputed later without rerunning inference.
 
 Options:
-  --eval-root <path>                   Final self-contained benchmark root. Default: data/benchmark
+  --eval-root <path>                   Benchmark root. Default: data/benchmark
   --output-root <path>                 Output root. Default: data/evaluation/infer
   --tracks <csv>                       Comma-separated tracks. Default: atomic_ops,main
   --model <name>                       API model name. Required
@@ -25,7 +25,7 @@ Options:
   --max-samples <int>                  Optional cap for smoke tests. Default: 0 (all)
   --max-input-chars <int>              Skip inference for samples longer than this many chars. Default: 0 (disabled)
   --temperature <float>                Default: 0.0
-  --max-tokens <int>                   Default: 4096
+  --max-tokens <int>                   Default: 0 (use model/server default)
   --progress-every <int>               Default: 20
   --resume                             Resume missing prompt variants from existing outputs
   -h, --help                           Show this help
@@ -64,7 +64,7 @@ PROMPT_VARIANT_INDICES="all"
 MAX_SAMPLES="0"
 MAX_INPUT_CHARS="0"
 TEMPERATURE="0.0"
-MAX_TOKENS="4096"
+MAX_TOKENS="0"
 PROGRESS_EVERY="20"
 RESUME="false"
 
