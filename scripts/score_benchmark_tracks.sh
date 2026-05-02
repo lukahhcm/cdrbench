@@ -89,7 +89,7 @@ for track in "${TRACKS[@]}"; do
   fi
 
   cmd=(
-    "$PYTHON_BIN" -m cdrbench.eval.run_benchmark_eval score
+    "$PYTHON_BIN" -m cdrbench.eval.run_benchmark_score
     --predictions-path "$predictions_path"
     --output-dir "$output_dir"
     --progress-every "$PROGRESS_EVERY"

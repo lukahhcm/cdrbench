@@ -1144,13 +1144,7 @@ def _score(args: argparse.Namespace) -> None:
     _print_summary(summary)
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description='Run or score CDR-Bench evaluations. Atomic track is the initial target, but the scorer also works for main and order tracks.'
-    )
-    subparsers = parser.add_subparsers(dest='command', required=True)
-
-    predict_parser = subparsers.add_parser('predict', help='Call an OpenAI-compatible API on eval-ready JSONL and save raw predictions.')
+def add_infer_args(predict_parser: argparse.ArgumentParser) -> None:
     predict_parser.add_argument('--eval-path', required=True, help='Eval-ready JSONL, e.g. data/benchmark/atomic_ops/atomic_ops.jsonl')
     predict_parser.add_argument('--output-path', required=True, help='Prediction JSONL output path.')
     predict_parser.add_argument('--prompt-config', default=str(DEFAULT_PROMPT_CONFIG.relative_to(ROOT)))
@@ -1177,14 +1171,9 @@ def main() -> None:
     predict_parser.add_argument('--concurrency', type=int, default=1)
     predict_parser.add_argument('--progress-every', type=int, default=DEFAULT_PROGRESS_EVERY)
     predict_parser.add_argument('--resume', action='store_true')
-    predict_parser.set_defaults(func=_predict)
 
-    infer_parser = subparsers.add_parser('infer', help='Alias for predict; saves raw model outputs for later metric computation.')
-    for action in predict_parser._actions[1:]:
-        infer_parser._add_action(action)
-    infer_parser.set_defaults(func=_predict)
 
-    score_parser = subparsers.add_parser('score', help='Score existing prediction JSONL and write reports.')
+def add_score_args(score_parser: argparse.ArgumentParser) -> None:
     score_parser.add_argument('--predictions-path', required=True)
     score_parser.add_argument('--output-dir', required=True)
     score_parser.add_argument('--model', default=None)
@@ -1196,7 +1185,33 @@ def main() -> None:
         action='store_true',
         help='Write slice-analysis CSV files such as by_operator.csv and by_domain.csv. Disabled by default.',
     )
-    score_parser.set_defaults(func=_score)
+
+
+def run_infer_cli(args: argparse.Namespace) -> None:
+    _predict(args)
+
+
+def run_score_cli(args: argparse.Namespace) -> None:
+    _score(args)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description='Run or score CDR-Bench evaluations. Atomic track is the initial target, but the scorer also works for main and order tracks.'
+    )
+    subparsers = parser.add_subparsers(dest='command', required=True)
+
+    predict_parser = subparsers.add_parser('predict', help='Call an OpenAI-compatible API on eval-ready JSONL and save raw predictions.')
+    add_infer_args(predict_parser)
+    predict_parser.set_defaults(func=run_infer_cli)
+
+    infer_parser = subparsers.add_parser('infer', help='Alias for predict; saves raw model outputs for later metric computation.')
+    add_infer_args(infer_parser)
+    infer_parser.set_defaults(func=run_infer_cli)
+
+    score_parser = subparsers.add_parser('score', help='Score existing prediction JSONL and write reports.')
+    add_score_args(score_parser)
+    score_parser.set_defaults(func=run_score_cli)
 
     args = parser.parse_args()
     args.func(args)

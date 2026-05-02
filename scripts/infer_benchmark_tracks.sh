@@ -176,7 +176,7 @@ for track in "${TRACKS[@]}"; do
   fi
 
   cmd=(
-    "$PYTHON_BIN" -m cdrbench.eval.run_benchmark_eval infer
+    "$PYTHON_BIN" -m cdrbench.eval.run_benchmark_infer
     --eval-path "$eval_path"
     --output-path "$output_dir/predictions.jsonl"
     --model "$MODEL"

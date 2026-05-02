@@ -225,7 +225,7 @@ for track in "${TRACKS[@]}"; do
       exit 1
     fi
     predict_cmd=(
-      "$PYTHON_BIN" -m cdrbench.eval.run_benchmark_eval predict
+      "$PYTHON_BIN" -m cdrbench.eval.run_benchmark_infer
       --eval-path "$eval_path"
       --output-path "$track_infer_dir/predictions.jsonl"
       --model "$MODEL"
@@ -257,7 +257,7 @@ for track in "${TRACKS[@]}"; do
       predictions_path="$track_infer_dir/predictions.jsonl"
     fi
     score_cmd=(
-      "$PYTHON_BIN" -m cdrbench.eval.run_benchmark_eval score
+      "$PYTHON_BIN" -m cdrbench.eval.run_benchmark_score
       --predictions-path "$predictions_path"
       --output-dir "$(dirname "$predictions_path")"
       --progress-every 20
