@@ -272,7 +272,7 @@ else:
     refinement_gain = 1 - d_pred / d_input
 ```
 
-The main evaluator uses raw-string exact match for `recipe_success`. It also reports a relaxed canonical-text match as a secondary diagnostic only.
+The main evaluator uses raw-string exact match for `recipe_success`.
 
 Benchmark composition visualization:
 
@@ -491,7 +491,7 @@ If you want one command that runs model inference and scoring across `atomic_ops
   --model gpt-5.4 \
   --base-url http://123.57.212.178:3333/v1 \
   --concurrency 1 \
-  --output-root data/eval_runs/gpt54_all
+  --infer-root data/eval_runs/gpt54_all
 ```
 
 For a local `vllm` server:
@@ -502,14 +502,14 @@ For a local `vllm` server:
   --base-url http://127.0.0.1:8000/v1 \
   --api-key EMPTY \
   --concurrency 16 \
-  --output-root data/eval_runs/local_model_all
+  --infer-root data/eval_runs/local_model_all
 ```
 
 Useful variants:
 
 ```bash
 ./scripts/eval_benchmark_all_tracks.sh --tracks main,order_sensitivity --resume
-./scripts/eval_benchmark_all_tracks.sh --predict-only --tracks atomic_ops
+./scripts/eval_benchmark_all_tracks.sh --infer-only --tracks atomic_ops
 ./scripts/eval_benchmark_all_tracks.sh --score-only --predictions-root /path/to/predictions_root
 ```
 
@@ -522,9 +522,26 @@ Per-track outputs are written under the inference root:
 Each track writes:
 
 - `predictions.jsonl`
-- `scored/summary.json`
-- `scored/scored_predictions.jsonl`
+- `summary.json`
+- `paper_metrics.json`
+- `report.txt`
+- `instance_metrics.jsonl`
+- `scored_variant_predictions.jsonl`
 - slice CSVs such as `by_operator.csv`, `by_source_domain.csv`, and `by_reference_status.csv`
+
+To render paper-ready LaTeX result tables for `atomic_ops`, `main`, and `order_sensitivity` together, run:
+
+```bash
+PYTHONPATH=src python -m cdrbench.reporting.render_benchmark_results_tables \
+  --predictions-root data/eval_runs \
+  --output-dir data/eval_runs/reports
+```
+
+This writes:
+
+- `data/eval_runs/reports/atomic_ops_results_table.tex`
+- `data/eval_runs/reports/main_results_table.tex`
+- `data/eval_runs/reports/order_sensitivity_results_table.tex`
 
 Outputs:
 

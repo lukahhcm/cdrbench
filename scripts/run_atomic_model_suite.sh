@@ -46,14 +46,10 @@ cd "$REPO_ROOT"
 # Keep atomic_ops for the first sweep; add main later if needed.
 TRACKS="atomic_ops"
 
-# If your benchmark files are not stored in this repo's default data/ tree,
-# set them here to absolute paths.
 EVAL_ROOT="${EVAL_ROOT:-data/benchmark}"
-BENCHMARK_DIR="${BENCHMARK_DIR:-}"
 
-# Output roots. The script will create one subdirectory per model slug.
+# Output root. The script will create one subdirectory per model slug.
 INFERENCE_ROOT="${INFERENCE_ROOT:-data/evaluation/infer}"
-SCORE_ROOT="${SCORE_ROOT:-data/evaluation/score}"
 
 # Inference behavior.
 PROMPT_VARIANT_INDICES="${PROMPT_VARIANT_INDICES:-all}"
@@ -138,29 +134,19 @@ run_infer_for_model() {
 run_score_for_model() {
   local entry="$1"
   parse_model_entry "$entry"
-  local model_name="$MODEL_NAME_VALUE"
   local model_slug="$MODEL_SLUG_VALUE"
-  local base_url="${MODEL_BASE_URL_VALUE:-$DEFAULT_BASE_URL}"
 
   local cmd=(
     ./scripts/score_benchmark_tracks.sh
     --tracks "$TRACKS"
     --predictions-root "$INFERENCE_ROOT/$model_slug"
-    --output-root "$SCORE_ROOT/$model_slug"
-    --model "$model_name"
     --progress-every "$PROGRESS_EVERY"
   )
-  if [[ -n "$BENCHMARK_DIR" ]]; then
-    cmd+=(--benchmark-dir "$BENCHMARK_DIR")
-  fi
-  if [[ -n "$base_url" ]]; then
-    cmd+=(--base-url "$base_url")
-  fi
   if [[ "$RESUME_SCORE" == "true" ]]; then
     cmd+=(--resume)
   fi
 
-  echo "[suite] mode=score model=$model_name slug=$model_slug tracks=$TRACKS"
+  echo "[suite] mode=score slug=$model_slug tracks=$TRACKS"
   "${cmd[@]}"
 }
 

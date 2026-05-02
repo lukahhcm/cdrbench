@@ -91,7 +91,6 @@ for track in "${TRACKS[@]}"; do
   cmd=(
     "$PYTHON_BIN" -m cdrbench.eval.run_benchmark_score
     --predictions-path "$predictions_path"
-    --output-dir "$output_dir"
     --progress-every "$PROGRESS_EVERY"
   )
   if [[ "$RESUME" == "true" ]]; then

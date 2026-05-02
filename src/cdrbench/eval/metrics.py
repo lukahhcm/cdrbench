@@ -1,24 +1,8 @@
 from __future__ import annotations
 
-import re
-import unicodedata
 from typing import Any
 
 import editdistance
-
-
-_WHITESPACE_RE = re.compile(r'\s+')
-_ZERO_WIDTH_RE = re.compile(r'[\u200b\u200c\u200d\ufeff]')
-
-
-def canonicalize_text(value: Any) -> str:
-    text = '' if value is None else str(value)
-    text = unicodedata.normalize('NFKC', text)
-    text = text.replace('\r\n', '\n').replace('\r', '\n')
-    text = _ZERO_WIDTH_RE.sub('', text)
-    text = text.strip()
-    text = _WHITESPACE_RE.sub(' ', text)
-    return text
 
 
 def normalize_status(value: Any) -> str:
@@ -42,15 +26,11 @@ def compute_recipe_metrics(
     raw_reference = '' if reference_text is None else str(reference_text)
     raw_prediction = '' if predicted_clean_text is None else str(predicted_clean_text)
 
-    canonical_input = canonicalize_text(raw_input)
-    canonical_reference = canonicalize_text(raw_reference)
-    canonical_prediction = canonicalize_text(raw_prediction)
     normalized_reference_status = normalize_status(reference_status)
     normalized_prediction_status = normalize_status(predicted_status)
 
     status_match = normalized_prediction_status == normalized_reference_status
     text_exact_match = raw_prediction == raw_reference
-    text_canonical_match = canonical_prediction == canonical_reference
     recipe_success = status_match and text_exact_match
 
     d_input = edit_distance(raw_input, raw_reference)
@@ -61,17 +41,10 @@ def compute_recipe_metrics(
         refinement_gain = 1.0 - (d_pred / d_input)
 
     return {
-        'raw_input_text': raw_input,
-        'raw_reference_text': raw_reference,
-        'raw_predicted_clean_text': raw_prediction,
-        'canonical_input_text': canonical_input,
-        'canonical_reference_text': canonical_reference,
-        'canonical_predicted_clean_text': canonical_prediction,
         'normalized_reference_status': normalized_reference_status,
         'normalized_predicted_status': normalized_prediction_status,
         'status_match': status_match,
         'text_exact_match': text_exact_match,
-        'text_canonical_match': text_canonical_match,
         'recipe_success': recipe_success,
         'text_match': text_exact_match,
         'edit_distance_input_to_reference': d_input,
