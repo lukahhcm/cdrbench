@@ -4,6 +4,8 @@ import re
 import unicodedata
 from typing import Any
 
+import editdistance
+
 
 _WHITESPACE_RE = re.compile(r'\s+')
 _ZERO_WIDTH_RE = re.compile(r'[\u200b\u200c\u200d\ufeff]')
@@ -25,26 +27,7 @@ def normalize_status(value: Any) -> str:
 
 
 def edit_distance(left: str, right: str) -> int:
-    if left == right:
-        return 0
-    if not left:
-        return len(right)
-    if not right:
-        return len(left)
-
-    if len(left) < len(right):
-        left, right = right, left
-
-    previous = list(range(len(right) + 1))
-    for left_index, left_char in enumerate(left, start=1):
-        current = [left_index]
-        for right_index, right_char in enumerate(right, start=1):
-            insert_cost = current[right_index - 1] + 1
-            delete_cost = previous[right_index] + 1
-            replace_cost = previous[right_index - 1] + (left_char != right_char)
-            current.append(min(insert_cost, delete_cost, replace_cost))
-        previous = current
-    return previous[-1]
+    return int(editdistance.eval(left, right))
 
 
 def compute_recipe_metrics(

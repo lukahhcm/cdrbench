@@ -17,6 +17,7 @@ dependencies = [
   "beautifulsoup4",
   "jsonlines",
   "openai",
+  "editdistance",
 ]
 
 [tool.setuptools]
