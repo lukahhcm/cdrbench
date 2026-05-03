@@ -9,6 +9,8 @@ MODEL_NAME="${2:-${MODEL_NAME:?'MODEL_NAME required'}}"
 PORT="${3:-${PORT:-8901}}"
 GPU_IDS="${4:-${GPU_IDS:-0}}"
 TP_SIZE="${5:-${TP_SIZE:-1}}"
+MAX_MODEL_LEN="${MAX_MODEL_LEN:-32768}"
+MAX_NUM_BATCHED_TOKENS="${MAX_NUM_BATCHED_TOKENS:-32768}"
 
 export VLLM_USE_MODELSCOPE="${VLLM_USE_MODELSCOPE:-False}"
 
@@ -18,12 +20,15 @@ echo "[start_vllm] MODEL_NAME = ${MODEL_NAME}"
 echo "[start_vllm] PORT       = ${PORT}"
 echo "[start_vllm] GPU_IDS    = ${GPU_IDS}"
 echo "[start_vllm] TP_SIZE    = ${TP_SIZE}"
+echo "[start_vllm] MAX_MODEL_LEN = ${MAX_MODEL_LEN}"
+echo "[start_vllm] MAX_NUM_BATCHED_TOKENS = ${MAX_NUM_BATCHED_TOKENS}"
 echo "========================================================"
 
 CUDA_VISIBLE_DEVICES="${GPU_IDS}" python -m vllm.entrypoints.openai.api_server \
   --model "${MODEL_PATH}" \
   --served-model-name "${MODEL_NAME}" \
-  --max-model-len 32768 \
+  --max-model-len "${MAX_MODEL_LEN}" \
+  --max-num-batched-tokens "${MAX_NUM_BATCHED_TOKENS}" \
   --trust-remote-code \
   --tensor-parallel-size "${TP_SIZE}" \
   --port "${PORT}" \
