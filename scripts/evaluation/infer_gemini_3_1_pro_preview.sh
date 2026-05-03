@@ -41,5 +41,8 @@ fi
 if [[ "${RESUME:-true}" == "true" ]]; then
   cmd+=(--resume)
 fi
+if [[ $# -gt 0 ]]; then
+  cmd+=("$@")
+fi
 
 exec "${cmd[@]}"
