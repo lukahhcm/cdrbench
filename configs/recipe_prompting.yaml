@@ -1,7 +1,8 @@
 version: 1
 
 global_prompting_rules:
-  output_should_be_plain_json: true
+  output_should_be_plain_json: false
+  output_should_be_tagged_text: true
   avoid_markdown_code_fences: true
   avoid_explanatory_prefix_suffix: true
   preserve_operator_order: true
@@ -16,18 +17,18 @@ prompt_styles:
     description: >
       User-facing natural-language request. It hides Data-Juicer operator names,
       preserves the exact internal order, and asks the model to return only the
-      final CDR-Bench JSON object.
+      final CDR-Bench tagged output.
     system_prompt: >
       You are a careful data refinement engine. Follow the user's data
-      refinement request exactly and in order. Return only the required JSON
-      object. Do not explain your reasoning.
+      refinement request exactly and in order. Return only the required tagged
+      output. Do not explain your reasoning.
     output_contract:
       status_values:
         - KEEP
         - DROP
       keep_behavior: If the sample is kept, return the final refined text in clean_text.
       drop_behavior: If any filtering step rejects the sample, stop and return DROP with the current text in clean_text.
-      json_schema_hint: '{"status":"KEEP","clean_text":"..."} or {"status":"DROP","clean_text":"..."}'
+      tagged_output_hint: '<status>KEEP</status><clean_text>...</clean_text> or <status>DROP</status><clean_text>...</clean_text>'
 
 domain_contexts:
   web: Clean a web-crawl text sample for corpus ingestion.

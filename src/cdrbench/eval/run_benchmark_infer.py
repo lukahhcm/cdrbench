@@ -111,17 +111,17 @@ def _default_system_prompt(prompt_cfg: dict[str, Any]) -> str:
     return (
         'You are a careful data refinement engine. '
         'Follow the user request exactly and in order. '
-        'Return only the required JSON object.'
+        'Return only the required tagged output.'
     )
 
 
-def _json_schema_hint(prompt_cfg: dict[str, Any]) -> str:
+def _tagged_output_hint(prompt_cfg: dict[str, Any]) -> str:
     style_cfg = _prompt_style_config(prompt_cfg)
     output_contract = style_cfg.get('output_contract') or {}
-    hint = output_contract.get('json_schema_hint') if isinstance(output_contract, dict) else None
+    hint = output_contract.get('tagged_output_hint') if isinstance(output_contract, dict) else None
     if isinstance(hint, str) and hint.strip():
         return hint.strip()
-    return '{"status":"KEEP","clean_text":"..."} or {"status":"DROP","clean_text":"..."}'
+    return '<status>KEEP</status><clean_text>...</clean_text> or <status>DROP</status><clean_text>...</clean_text>'
 
 
 def _base_inference_row(eval_row: dict[str, Any]) -> dict[str, Any]:
@@ -200,39 +200,62 @@ def _select_prompt_variant(row: dict[str, Any], prompt_variant_index: int) -> di
     raise RuntimeError(f'No usable prompt variant found for instance_id={row.get("instance_id")}.')
 
 
-def _render_user_prompt(row: dict[str, Any], user_requirement: str, schema_hint: str) -> str:
+def _render_user_prompt(row: dict[str, Any], user_requirement: str, output_hint: str) -> str:
     return (
         f"Task:\n{user_requirement}\n\n"
         "Raw input text:\n"
         "<input>\n"
         f"{str(row.get('input_text', ''))}\n"
         "</input>\n\n"
-        "Return JSON only.\n"
-        f"Use exactly this schema: {schema_hint}\n"
+        "Return tagged output only.\n"
+        f"Use exactly this format: {output_hint}\n"
         "Rules:\n"
-        "- status must be KEEP or DROP.\n"
+        "- status must be KEEP or DROP inside <status>...</status>.\n"
+        "- Put the output text inside <clean_text>...</clean_text>.\n"
         "- If status is KEEP, clean_text must be the final refined text.\n"
         "- If status is DROP, clean_text must be the text state at the point where the sample is rejected.\n"
+        "- Preserve backslashes exactly as plain text; do not JSON-escape them.\n"
         "- Do not output markdown, code fences, or explanations.\n"
     )
+
+
+def _extract_tagged_prediction_payload(response_text: str) -> tuple[dict[str, Any] | None, str | None]:
+    status_match = re.search(r'<status>\s*(KEEP|DROP)\s*</status>', response_text, flags=re.IGNORECASE | re.DOTALL)
+    clean_match = re.search(r'<clean_text>(.*?)</clean_text>', response_text, flags=re.IGNORECASE | re.DOTALL)
+    if not status_match or not clean_match:
+        return None, 'tag_parse_error'
+    status_value = str(status_match.group(1)).strip().upper()
+    clean_text = str(clean_match.group(1))
+    return {
+        'status': status_value,
+        'clean_text': clean_text,
+        'output_format': 'tagged_v1',
+    }, None
 
 
 def _extract_prediction_payload(response_text: str) -> tuple[dict[str, Any] | None, str | None]:
     if not response_text.strip():
         return None, 'empty_response'
+    tagged_payload, tagged_error = _extract_tagged_prediction_payload(response_text)
+    if tagged_error is None:
+        return tagged_payload, None
     try:
         payload = parse_json_response(response_text)
     except Exception as exc:
-        return None, f'json_parse_error: {exc}'
+        return None, f'tag_parse_error; json_parse_error: {exc}'
     if not isinstance(payload, dict):
-        return None, 'json_parse_error: response is not a JSON object'
+        return None, 'tag_parse_error; json_parse_error: response is not a JSON object'
     return payload, None
 
 
 def _is_retryable_prediction_error(prediction_error: str | None) -> bool:
     if not prediction_error:
         return False
-    return prediction_error == 'empty_response' or prediction_error.startswith('json_parse_error:')
+    return (
+        prediction_error == 'empty_response'
+        or prediction_error.startswith('json_parse_error:')
+        or prediction_error.startswith('tag_parse_error')
+    )
 
 
 def _extract_prediction_fields(prediction_payload: dict[str, Any] | None) -> tuple[str, str]:
@@ -333,7 +356,7 @@ def main() -> None:
     output_dir = output_path.parent
     prompt_cfg = _load_yaml((ROOT / args.prompt_config).resolve())
     system_prompt = _default_system_prompt(prompt_cfg)
-    schema_hint = _json_schema_hint(prompt_cfg)
+    output_hint = _tagged_output_hint(prompt_cfg)
     rows = _read_jsonl(eval_path)
     if args.max_samples > 0:
         rows = rows[: args.max_samples]
@@ -379,7 +402,7 @@ def main() -> None:
                         'user_requirement': user_requirement,
                         'messages': [
                             {'role': 'system', 'content': system_prompt},
-                            {'role': 'user', 'content': _render_user_prompt(row, user_requirement, schema_hint)},
+                            {'role': 'user', 'content': _render_user_prompt(row, user_requirement, output_hint)},
                         ],
                     },
                     variant_predictions,
