@@ -7,16 +7,16 @@ cd "${REPO_ROOT}"
 
 TRACKS="${TRACKS:-atomic_ops,main,order_sensitivity}"
 EVAL_ROOT="${EVAL_ROOT:-data/benchmark}"
-MODEL="${MODEL:-ai_studio.gemini-3.1-pro-preview}"
-BASE_URL="${BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}"
-API_KEY="${API_KEY:-}"
-OUTPUT_ROOT="${OUTPUT_ROOT:-data/evaluation/infer/gemini_3_1_pro_preview}"
+MODEL="${MODEL:-llama_4_scout_17b_16e_instruct}"
+BASE_URL="${BASE_URL:-http://127.0.0.1:8908/v1}"
+API_KEY="${API_KEY:-EMPTY}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-data/evaluation/infer/${MODEL}}"
 PROMPT_VARIANT_INDICES="${PROMPT_VARIANT_INDICES:-all}"
 MAX_SAMPLES="${MAX_SAMPLES:-0}"
 MAX_INPUT_CHARS="${MAX_INPUT_CHARS:-0}"
 TEMPERATURE="${TEMPERATURE:-0.0}"
 MAX_TOKENS="${MAX_TOKENS:-0}"
-CONCURRENCY="${CONCURRENCY:-10}"
+CONCURRENCY="${CONCURRENCY:-16}"
 PROGRESS_EVERY="${PROGRESS_EVERY:-20}"
 
 cmd=(
@@ -25,6 +25,7 @@ cmd=(
   --eval-root "${EVAL_ROOT}"
   --model "${MODEL}"
   --base-url "${BASE_URL}"
+  --api-key "${API_KEY}"
   --output-root "${OUTPUT_ROOT}"
   --prompt-variant-indices "${PROMPT_VARIANT_INDICES}"
   --max-samples "${MAX_SAMPLES}"
@@ -35,9 +36,6 @@ cmd=(
   --progress-every "${PROGRESS_EVERY}"
 )
 
-if [[ -n "${API_KEY}" ]]; then
-  cmd+=(--api-key "${API_KEY}")
-fi
 if [[ "${RESUME:-true}" == "true" ]]; then
   cmd+=(--resume)
 fi
