@@ -465,7 +465,7 @@ def main() -> None:
     args = parser.parse_args()
 
     predictions_path = Path(args.predictions_path).resolve()
-    output_dir = Path(args.output_dir).resolve() if args.output_dir else predictions_path.parent.resolve()
+    output_dir = Path(args.output_dir).resolve() if args.output_dir else (predictions_path.parent / 'score').resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
     prediction_rows = _read_jsonl(predictions_path)

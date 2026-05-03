@@ -13,7 +13,8 @@ By default this script targets all three benchmark tracks:
   2. main
   3. order_sensitivity
 
-This step only reads predictions, computes metrics, and writes reports next to `predictions.jsonl`.
+This step only reads predictions, computes metrics, and writes reports under each
+track's `score/` subdirectory. It also writes slice CSVs such as `by_domain.csv`.
 
 Options:
   --predictions-root <path>           Inference root. Default: data/evaluation/infer
@@ -86,7 +87,7 @@ IFS=',' read -r -a TRACKS <<< "$TRACKS_CSV"
 
 for track in "${TRACKS[@]}"; do
   predictions_path="$PREDICTIONS_ROOT/$track/predictions.jsonl"
-  output_dir="$PREDICTIONS_ROOT/$track"
+  output_dir="$PREDICTIONS_ROOT/$track/score"
   mkdir -p "$output_dir"
 
   if [[ ! -f "$predictions_path" ]]; then
@@ -97,7 +98,9 @@ for track in "${TRACKS[@]}"; do
   cmd=(
     "$PYTHON_BIN" -m cdrbench.eval.run_benchmark_score
     --predictions-path "$predictions_path"
+    --output-dir "$output_dir"
     --progress-every "$PROGRESS_EVERY"
+    --write-csv-slices
   )
   if [[ "$RESUME" == "true" ]]; then
     cmd+=(--resume)
@@ -109,4 +112,4 @@ for track in "${TRACKS[@]}"; do
 done
 
 echo "[complete] scoring finished for tracks: ${TRACKS[*]}"
-echo "[complete] reports written under: $PREDICTIONS_ROOT"
+echo "[complete] reports written under each track's score/ subdirectory in: $PREDICTIONS_ROOT"
