@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,12 @@ ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_PROMPT_CONFIG = ROOT / 'configs' / 'recipe_prompting.yaml'
 DEFAULT_PROGRESS_EVERY = 20
 LOCAL_HOSTS = {'127.0.0.1', '0.0.0.0', '::1', 'localhost'}
+FATAL_REQUEST_ERROR_PATTERNS = (
+    re.compile(r'\b404\b'),
+    re.compile(r'model[^a-z0-9]+not[^a-z0-9]+found', re.IGNORECASE),
+    re.compile(r'not[^a-z0-9]+found', re.IGNORECASE),
+    re.compile(r'no[^a-z0-9]+such[^a-z0-9]+model', re.IGNORECASE),
+)
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -263,6 +270,12 @@ def _build_infer_backend(args: argparse.Namespace, model: str, base_url: str, ap
     return make_api_infer(**common_kwargs, api_key=api_key)
 
 
+def _is_fatal_request_error(error_text: str | None) -> bool:
+    if not error_text:
+        return False
+    return any(pattern.search(error_text) for pattern in FATAL_REQUEST_ERROR_PATTERNS)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description='Run CDR-Bench inference on eval-ready JSONL and save raw predictions.')
     parser.add_argument('--eval-path', required=True)
@@ -361,7 +374,18 @@ def main() -> None:
     )
 
     if variant_jobs:
-        infer_results = infer_backend.infer([job[3]['messages'] for job in variant_jobs])
+        first_job = variant_jobs[0]
+        preflight_result = infer_backend.infer_one(first_job[3]['messages'])
+        if preflight_result.error and _is_fatal_request_error(preflight_result.error):
+            raise SystemExit(
+                f'preflight infer request failed for model={model} base_url={base_url}: {preflight_result.error}'
+            )
+
+        remaining_jobs = variant_jobs[1:]
+        infer_results = [preflight_result]
+        if remaining_jobs:
+            infer_results.extend(infer_backend.infer([job[3]['messages'] for job in remaining_jobs]))
+
         for index, infer_result in enumerate(infer_results, start=1):
             row_index, row, prompt_variant_index, meta, variant_predictions, selected_prompt_variant_indices = variant_jobs[index - 1]
             response_text = infer_result.text

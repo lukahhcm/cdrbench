@@ -43,11 +43,7 @@ class OpenAIInfer(BaseInfer):
         self.max_retries = max_retries
         self.retry_delay = retry_delay
         self.enable_thinking = enable_thinking
-        self._extra_body: Dict[str, Any] = (
-            extra_body
-            if extra_body is not None
-            else {'chat_template_kwargs': {'enable_thinking': enable_thinking}}
-        )
+        self._extra_body: Dict[str, Any] = extra_body or {}
         self._client = OpenAI(api_key=api_key, base_url=api_base)
 
     def _call_once(self, messages: List[dict]) -> str:
@@ -107,6 +103,7 @@ def make_vllm_infer(
         max_retries=max_retries,
         retry_delay=retry_delay,
         enable_thinking=enable_thinking,
+        extra_body={'chat_template_kwargs': {'enable_thinking': enable_thinking}},
     )
 
 
@@ -133,4 +130,5 @@ def make_api_infer(
         max_retries=max_retries,
         retry_delay=retry_delay,
         enable_thinking=False,
+        extra_body={},
     )
