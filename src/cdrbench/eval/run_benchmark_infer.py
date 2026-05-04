@@ -277,6 +277,12 @@ def _existing_variant_prediction_map(row: dict[str, Any]) -> dict[int, dict[str,
     return mapping
 
 
+def _variant_prediction_completed_successfully(variant: dict[str, Any] | None) -> bool:
+    if not isinstance(variant, dict):
+        return False
+    return variant.get('prediction_error') is None
+
+
 def _row_input_length_chars(row: dict[str, Any]) -> int:
     value = row.get('input_length_chars')
     if isinstance(value, int):
@@ -387,7 +393,7 @@ def main() -> None:
         existing_variant_predictions = _existing_variant_prediction_map(existing_rows_by_id.get(instance_id, {}))
         variant_predictions = dict(existing_variant_predictions)
         for prompt_variant_index in selected_prompt_variant_indices:
-            if prompt_variant_index in existing_variant_predictions:
+            if _variant_prediction_completed_successfully(existing_variant_predictions.get(prompt_variant_index)):
                 continue
             prompt_variant = _select_prompt_variant(row, prompt_variant_index)
             user_requirement = str(prompt_variant.get('user_requirement') or '').strip()
