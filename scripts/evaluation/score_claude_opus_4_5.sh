@@ -6,7 +6,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 cd "${REPO_ROOT}"
 
 TRACKS="${TRACKS:-atomic_ops,main,order_sensitivity}"
-PREDICTIONS_ROOT="${PREDICTIONS_ROOT:-data/evaluation/infer/claude_opus_4_6}"
+PREDICTIONS_ROOT="${PREDICTIONS_ROOT:-data/evaluation/infer/claude_opus_4_5}"
 PROGRESS_EVERY="${PROGRESS_EVERY:-20}"
 
 cmd=(
