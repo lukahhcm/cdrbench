@@ -20,7 +20,16 @@ DEFAULT_PROMPT_CONFIG = ROOT / 'configs' / 'recipe_prompting.yaml'
 DEFAULT_PROGRESS_EVERY = 20
 LOCAL_HOSTS = {'127.0.0.1', '0.0.0.0', '::1', 'localhost'}
 FATAL_REQUEST_ERROR_PATTERNS = (
+    re.compile(r'\b400\b'),
+    re.compile(r'\b401\b'),
+    re.compile(r'\b403\b'),
     re.compile(r'\b404\b'),
+    re.compile(r'unauthorized', re.IGNORECASE),
+    re.compile(r'forbidden', re.IGNORECASE),
+    re.compile(r'invalid[^a-z0-9]+api[^a-z0-9]+key', re.IGNORECASE),
+    re.compile(r'incorrect[^a-z0-9]+api[^a-z0-9]+key', re.IGNORECASE),
+    re.compile(r'api[^a-z0-9]+key[^a-z0-9]+invalid', re.IGNORECASE),
+    re.compile(r'permission[^a-z0-9]+denied', re.IGNORECASE),
     re.compile(r'model[^a-z0-9]+not[^a-z0-9]+found', re.IGNORECASE),
     re.compile(r'not[^a-z0-9]+found', re.IGNORECASE),
     re.compile(r'no[^a-z0-9]+such[^a-z0-9]+model', re.IGNORECASE),
@@ -335,6 +344,11 @@ def _log_prediction_issue(
     )
 
 
+def _chunked(items: list[Any], chunk_size: int) -> list[list[Any]]:
+    size = max(1, chunk_size)
+    return [items[index : index + size] for index in range(0, len(items), size)]
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description='Run CDR-Bench inference on eval-ready JSONL and save raw predictions.')
     parser.add_argument('--eval-path', required=True)
@@ -441,19 +455,45 @@ def main() -> None:
                 f'preflight infer request failed for model={model} base_url={base_url}: {preflight_result.error}'
             )
 
+        indexed_results: list[tuple[int, Any]] = [(0, preflight_result)]
         remaining_jobs = variant_jobs[1:]
-        infer_results = [preflight_result]
         if remaining_jobs:
-            infer_results.extend(infer_backend.infer([job[3]['messages'] for job in remaining_jobs]))
+            chunk_size = max(1, int(args.concurrency))
+            start_index = 1
+            for job_chunk in _chunked(remaining_jobs, chunk_size):
+                chunk_results = infer_backend.infer([job[3]['messages'] for job in job_chunk])
+                indexed_results.extend(
+                    (start_index + offset, result)
+                    for offset, result in enumerate(chunk_results)
+                )
+                for offset, chunk_result in enumerate(chunk_results):
+                    if chunk_result.error and _is_fatal_request_error(chunk_result.error):
+                        fatal_job = job_chunk[offset]
+                        fatal_instance_id = str(fatal_job[1].get('instance_id') or '')
+                        fatal_prompt_variant_index = fatal_job[2]
+                        raise SystemExit(
+                            'fatal infer request error encountered; stopping immediately '
+                            f'track={track_name} instance_id={fatal_instance_id or "UNKNOWN"} '
+                            f'prompt_variant_index={fatal_prompt_variant_index} '
+                            f'model={model} base_url={base_url} error={chunk_result.error}'
+                        )
+                start_index += len(job_chunk)
 
-        for index, infer_result in enumerate(infer_results, start=1):
-            row_index, row, prompt_variant_index, meta, variant_predictions, selected_prompt_variant_indices = variant_jobs[index - 1]
+        for index, infer_result in indexed_results:
+            row_index, row, prompt_variant_index, meta, variant_predictions, selected_prompt_variant_indices = variant_jobs[index]
             instance_id = str(row.get('instance_id') or '')
             response_text = infer_result.text
             prediction_payload = None
             prediction_error = None
             if infer_result.error is not None:
                 prediction_error = f'request_error: {infer_result.error}'
+                if _is_fatal_request_error(infer_result.error):
+                    raise SystemExit(
+                        'fatal infer request error encountered; stopping immediately '
+                        f'track={track_name} instance_id={instance_id or "UNKNOWN"} '
+                        f'prompt_variant_index={prompt_variant_index} '
+                        f'model={model} base_url={base_url} error={infer_result.error}'
+                    )
             else:
                 prediction_payload, prediction_error = _extract_prediction_payload(response_text)
             retry_attempted = False
@@ -469,6 +509,13 @@ def main() -> None:
                 if retry_result.error is not None:
                     prediction_payload = None
                     prediction_error = f'request_error: {retry_result.error}'
+                    if _is_fatal_request_error(retry_result.error):
+                        raise SystemExit(
+                            'fatal infer request error encountered after retry; stopping immediately '
+                            f'track={track_name} instance_id={instance_id or "UNKNOWN"} '
+                            f'prompt_variant_index={prompt_variant_index} '
+                            f'model={model} base_url={base_url} error={retry_result.error}'
+                        )
                 else:
                     prediction_payload, prediction_error = _extract_prediction_payload(response_text)
             _log_prediction_issue(
@@ -497,10 +544,11 @@ def main() -> None:
             }
             output_rows[row_index]['variant_predictions'] = [variant_predictions[key] for key in sorted(variant_predictions)]
             output_rows[row_index]['selected_prompt_variant_indices'] = selected_prompt_variant_indices
-            if index % args.progress_every == 0 or index == len(variant_jobs):
+            completed_count = index + 1
+            if completed_count % args.progress_every == 0 or completed_count == len(variant_jobs):
                 elapsed = time.time() - started
                 _write_progress_snapshot(output_path, output_dir, output_rows, model, base_url, track_name)
-                print(f'progress infer variant={index}/{len(variant_jobs)} elapsed_sec={elapsed:.1f}', flush=True)
+                print(f'progress infer variant={completed_count}/{len(variant_jobs)} elapsed_sec={elapsed:.1f}', flush=True)
 
     _write_progress_snapshot(output_path, output_dir, output_rows, model, base_url, track_name)
     print(f'wrote predictions -> {output_path}', flush=True)
