@@ -294,9 +294,11 @@ def _aggregate_instance_metrics(prediction_row: dict[str, Any], variant_rows: li
     recipe_success_request_ok_values = [1.0 if bool(row.get('recipe_success')) else 0.0 for row in request_ok_rows]
     prompt_variant_metrics = []
     recipe_success_by_index: dict[int, bool | None] = {}
+    normalized_recipe_success_by_index: dict[int, bool | None] = {}
     for row in variant_rows:
         index = int(row.get('prompt_variant_index', 0) or 0)
         recipe_success_by_index[index] = None if bool(row.get('request_error')) else bool(row.get('recipe_success'))
+        normalized_recipe_success_by_index[index] = None if bool(row.get('request_error')) else bool(row.get('normalized_recipe_success'))
         prompt_variant_metrics.append(
             {
                 'prompt_variant_index': index,
@@ -330,6 +332,7 @@ def _aggregate_instance_metrics(prediction_row: dict[str, Any], variant_rows: li
             'num_request_error_variants': sum(1 for row in variant_rows if bool(row.get('request_error'))),
             'prompt_variant_metrics': prompt_variant_metrics,
             'recipe_success_prompt0': recipe_success_by_index.get(0),
+            'normalized_recipe_success_prompt0': normalized_recipe_success_by_index.get(0),
         }
     )
     return instance_row
@@ -347,6 +350,16 @@ def _build_order_group_rows(instance_rows: list[dict[str, Any]]) -> list[dict[st
             'slot_count': len(bucket),
             'ocs': (all(bool(row.get('recipe_success_prompt0')) for row in bucket) if all(row.get('recipe_success_prompt0') is not None for row in bucket) else None),
             'ocs_at_k': (all(bool(row.get('rs_at_k')) for row in bucket) if all(row.get('rs_at_k') is not None for row in bucket) else None),
+            'ocs_normalized': (
+                all(bool(row.get('normalized_recipe_success_prompt0')) for row in bucket)
+                if all(row.get('normalized_recipe_success_prompt0') is not None for row in bucket)
+                else None
+            ),
+            'ocs_at_k_normalized': (
+                all(bool(row.get('rs_at_k_normalized')) for row in bucket)
+                if all(row.get('rs_at_k_normalized') is not None for row in bucket)
+                else None
+            ),
         }
         for group_id, bucket in sorted(grouped.items())
     ]
@@ -435,6 +448,8 @@ def _summary_report_text(summary: dict[str, Any]) -> str:
     if 'ocs' in summary:
         parts.append(f"ocs={float(summary.get('ocs', 0.0)):.4f}")
         parts.append(f"ocs_at_k={float(summary.get('ocs_at_k', 0.0)):.4f}")
+        parts.append(f"ocs_normalized={float(summary.get('ocs_normalized', 0.0)):.4f}")
+        parts.append(f"ocs_at_k_normalized={float(summary.get('ocs_at_k_normalized', 0.0)):.4f}")
     return ' '.join(parts)
 
 
@@ -454,7 +469,7 @@ def _paper_metrics_payload(summary: dict[str, Any]) -> dict[str, Any]:
         'format_error_rate': summary.get('format_error_rate'),
         'request_error_rate': summary.get('request_error_rate'),
     }
-    for key in ('ocs', 'ocs_at_k', 'rs_front', 'rs_middle', 'rs_end'):
+    for key in ('ocs', 'ocs_at_k', 'ocs_normalized', 'ocs_at_k_normalized', 'rs_front', 'rs_middle', 'rs_end'):
         if key in summary:
             payload[key] = summary.get(key)
     return payload
@@ -498,6 +513,8 @@ def _build_summary(
     if order_group_rows:
         summary['ocs'] = _rate_optional(order_group_rows, 'ocs')
         summary['ocs_at_k'] = _rate_optional(order_group_rows, 'ocs_at_k')
+        summary['ocs_normalized'] = _rate_optional(order_group_rows, 'ocs_normalized')
+        summary['ocs_at_k_normalized'] = _rate_optional(order_group_rows, 'ocs_at_k_normalized')
         summary['rs_front'] = _safe_mean([float(row.get('mean_rs', 0.0)) for row in instance_rows if str(row.get('order_slot') or '') == 'front'])
         summary['rs_middle'] = _safe_mean([float(row.get('mean_rs', 0.0)) for row in instance_rows if str(row.get('order_slot') or '') == 'middle'])
         summary['rs_end'] = _safe_mean([float(row.get('mean_rs', 0.0)) for row in instance_rows if str(row.get('order_slot') or '') == 'end'])
