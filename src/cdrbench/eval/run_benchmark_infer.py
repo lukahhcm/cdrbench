@@ -76,6 +76,20 @@ def _write_progress_snapshot(output_path: Path, output_dir: Path, output_rows: l
     )
 
 
+def _raise_with_snapshot(
+    *,
+    output_path: Path,
+    output_dir: Path,
+    output_rows: list[dict[str, Any]],
+    model: str,
+    base_url: str,
+    track_name: str,
+    message: str,
+) -> None:
+    _write_progress_snapshot(output_path, output_dir, output_rows, model, base_url, track_name)
+    raise SystemExit(message)
+
+
 def _load_yaml(path: Path) -> dict[str, Any]:
     with path.open('r', encoding='utf-8') as handle:
         payload = yaml.safe_load(handle)
@@ -320,7 +334,7 @@ def _build_infer_backend(args: argparse.Namespace, model: str, base_url: str, ap
         'temperature': args.temperature,
         'top_p': args.top_p,
         'num_runs': 1,
-        'max_retries': max(1, int(args.max_retries) + 1),
+        'max_retries': 1,
         'retry_delay': float(args.retry_sleep_seconds),
     }
     host = (urlparse(base_url).hostname or '').strip().lower()
@@ -356,6 +370,30 @@ def _log_prediction_issue(
     )
 
 
+def _retry_request_error(
+    *,
+    infer_backend: Any,
+    initial_result: Any,
+    messages: list[dict[str, str]],
+    track_name: str,
+    instance_id: str,
+    prompt_variant_index: int,
+    max_request_tries: int,
+) -> tuple[Any, int]:
+    result = initial_result
+    attempts = 1
+    while result.error is not None and attempts < max(1, max_request_tries):
+        attempts += 1
+        print(
+            f'retry request track={track_name} instance_id={instance_id or "UNKNOWN"} '
+            f'prompt_variant_index={prompt_variant_index} attempt={attempts}/{max(1, max_request_tries)} '
+            f'error={result.error}',
+            flush=True,
+        )
+        result = infer_backend.infer_one(messages)
+    return result, attempts
+
+
 def _chunked(items: list[Any], chunk_size: int) -> list[list[Any]]:
     size = max(1, chunk_size)
     return [items[index : index + size] for index in range(0, len(items), size)]
@@ -376,7 +414,7 @@ def main() -> None:
     parser.add_argument('--prompt-variant-indices', default=None)
     parser.add_argument('--max-samples', type=int, default=0)
     parser.add_argument('--max-input-chars', type=int, default=0)
-    parser.add_argument('--max-retries', type=int, default=2)
+    parser.add_argument('--max-retries', type=int, default=4)
     parser.add_argument('--retry-sleep-seconds', type=float, default=2.0)
     parser.add_argument('--concurrency', type=int, default=1)
     parser.add_argument('--progress-every', type=int, default=DEFAULT_PROGRESS_EVERY)
@@ -462,10 +500,6 @@ def main() -> None:
     if variant_jobs:
         first_job = variant_jobs[0]
         preflight_result = infer_backend.infer_one(first_job[3]['messages'])
-        if preflight_result.error and _is_fatal_request_error(preflight_result.error):
-            raise SystemExit(
-                f'preflight infer request failed for model={model} base_url={base_url}: {preflight_result.error}'
-            )
 
         indexed_results: list[tuple[int, Any]] = [(0, preflight_result)]
         remaining_jobs = variant_jobs[1:]
@@ -478,33 +512,39 @@ def main() -> None:
                     (start_index + offset, result)
                     for offset, result in enumerate(chunk_results)
                 )
-                for offset, chunk_result in enumerate(chunk_results):
-                    if chunk_result.error and _is_fatal_request_error(chunk_result.error):
-                        fatal_job = job_chunk[offset]
-                        fatal_instance_id = str(fatal_job[1].get('instance_id') or '')
-                        fatal_prompt_variant_index = fatal_job[2]
-                        raise SystemExit(
-                            'fatal infer request error encountered; stopping immediately '
-                            f'track={track_name} instance_id={fatal_instance_id or "UNKNOWN"} '
-                            f'prompt_variant_index={fatal_prompt_variant_index} '
-                            f'model={model} base_url={base_url} error={chunk_result.error}'
-                        )
                 start_index += len(job_chunk)
 
         for index, infer_result in indexed_results:
             row_index, row, prompt_variant_index, meta, variant_predictions, selected_prompt_variant_indices = variant_jobs[index]
             instance_id = str(row.get('instance_id') or '')
+            infer_result, request_attempts = _retry_request_error(
+                infer_backend=infer_backend,
+                initial_result=infer_result,
+                messages=meta['messages'],
+                track_name=track_name,
+                instance_id=instance_id,
+                prompt_variant_index=prompt_variant_index,
+                max_request_tries=max(1, int(args.max_retries) + 1),
+            )
             response_text = infer_result.text
             prediction_payload = None
             prediction_error = None
+            stop_message = None
             if infer_result.error is not None:
                 prediction_error = f'request_error: {infer_result.error}'
-                if _is_fatal_request_error(infer_result.error):
-                    raise SystemExit(
-                        'fatal infer request error encountered; stopping immediately '
+                if request_attempts >= max(1, int(args.max_retries) + 1):
+                    print(
+                        f'stop infer track={track_name} instance_id={instance_id or "UNKNOWN"} '
+                        f'prompt_variant_index={prompt_variant_index} attempts={request_attempts} '
+                        f'error={infer_result.error}',
+                        flush=True,
+                    )
+                    stop_message = (
+                        'request retries exhausted; stopping at current sample '
                         f'track={track_name} instance_id={instance_id or "UNKNOWN"} '
                         f'prompt_variant_index={prompt_variant_index} '
-                        f'model={model} base_url={base_url} error={infer_result.error}'
+                        f'attempts={request_attempts} model={model} base_url={base_url} '
+                        f'error={infer_result.error}'
                     )
             else:
                 prediction_payload, prediction_error = _extract_prediction_payload(response_text)
@@ -521,13 +561,12 @@ def main() -> None:
                 if retry_result.error is not None:
                     prediction_payload = None
                     prediction_error = f'request_error: {retry_result.error}'
-                    if _is_fatal_request_error(retry_result.error):
-                        raise SystemExit(
-                            'fatal infer request error encountered after retry; stopping immediately '
-                            f'track={track_name} instance_id={instance_id or "UNKNOWN"} '
-                            f'prompt_variant_index={prompt_variant_index} '
-                            f'model={model} base_url={base_url} error={retry_result.error}'
-                        )
+                    stop_message = (
+                        'request error encountered after parse retry; stopping at current sample '
+                        f'track={track_name} instance_id={instance_id or "UNKNOWN"} '
+                        f'prompt_variant_index={prompt_variant_index} '
+                        f'model={model} base_url={base_url} error={retry_result.error}'
+                    )
                 else:
                     prediction_payload, prediction_error = _extract_prediction_payload(response_text)
             _log_prediction_issue(
@@ -549,7 +588,7 @@ def main() -> None:
                 'parsed_response': prediction_payload,
                 'prediction_error': prediction_error,
                 'prediction_valid_json': prediction_error is None,
-                'retry_attempted': retry_attempted,
+                'retry_attempted': (retry_attempted or request_attempts > 1),
                 'response_usage': {},
                 'predicted_status': predicted_status,
                 'predicted_clean_text': predicted_clean_text,
@@ -557,6 +596,18 @@ def main() -> None:
             output_rows[row_index]['variant_predictions'] = [variant_predictions[key] for key in sorted(variant_predictions)]
             output_rows[row_index]['selected_prompt_variant_indices'] = selected_prompt_variant_indices
             completed_count = index + 1
+            if prediction_error is not None and str(prediction_error).startswith('request_error:'):
+                _write_progress_snapshot(output_path, output_dir, output_rows, model, base_url, track_name)
+            if stop_message is not None:
+                _raise_with_snapshot(
+                    output_path=output_path,
+                    output_dir=output_dir,
+                    output_rows=output_rows,
+                    model=model,
+                    base_url=base_url,
+                    track_name=track_name,
+                    message=stop_message,
+                )
             if completed_count % args.progress_every == 0 or completed_count == len(variant_jobs):
                 elapsed = time.time() - started
                 _write_progress_snapshot(output_path, output_dir, output_rows, model, base_url, track_name)
