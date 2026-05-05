@@ -501,21 +501,13 @@ def main() -> None:
         first_job = variant_jobs[0]
         preflight_result = infer_backend.infer_one(first_job[3]['messages'])
 
-        indexed_results: list[tuple[int, Any]] = [(0, preflight_result)]
         remaining_jobs = variant_jobs[1:]
+        infer_results = [preflight_result]
         if remaining_jobs:
-            chunk_size = max(1, int(args.concurrency))
-            start_index = 1
-            for job_chunk in _chunked(remaining_jobs, chunk_size):
-                chunk_results = infer_backend.infer([job[3]['messages'] for job in job_chunk])
-                indexed_results.extend(
-                    (start_index + offset, result)
-                    for offset, result in enumerate(chunk_results)
-                )
-                start_index += len(job_chunk)
+            infer_results.extend(infer_backend.infer([job[3]['messages'] for job in remaining_jobs]))
 
-        for index, infer_result in indexed_results:
-            row_index, row, prompt_variant_index, meta, variant_predictions, selected_prompt_variant_indices = variant_jobs[index]
+        for index, infer_result in enumerate(infer_results, start=1):
+            row_index, row, prompt_variant_index, meta, variant_predictions, selected_prompt_variant_indices = variant_jobs[index - 1]
             instance_id = str(row.get('instance_id') or '')
             infer_result, request_attempts = _retry_request_error(
                 infer_backend=infer_backend,
@@ -595,7 +587,6 @@ def main() -> None:
             }
             output_rows[row_index]['variant_predictions'] = [variant_predictions[key] for key in sorted(variant_predictions)]
             output_rows[row_index]['selected_prompt_variant_indices'] = selected_prompt_variant_indices
-            completed_count = index + 1
             if prediction_error is not None and str(prediction_error).startswith('request_error:'):
                 _write_progress_snapshot(output_path, output_dir, output_rows, model, base_url, track_name)
             if stop_message is not None:
@@ -608,10 +599,10 @@ def main() -> None:
                     track_name=track_name,
                     message=stop_message,
                 )
-            if completed_count % args.progress_every == 0 or completed_count == len(variant_jobs):
+            if index % args.progress_every == 0 or index == len(variant_jobs):
                 elapsed = time.time() - started
                 _write_progress_snapshot(output_path, output_dir, output_rows, model, base_url, track_name)
-                print(f'progress infer variant={completed_count}/{len(variant_jobs)} elapsed_sec={elapsed:.1f}', flush=True)
+                print(f'progress infer variant={index}/{len(variant_jobs)} elapsed_sec={elapsed:.1f}', flush=True)
 
     _write_progress_snapshot(output_path, output_dir, output_rows, model, base_url, track_name)
     print(f'wrote predictions -> {output_path}', flush=True)
