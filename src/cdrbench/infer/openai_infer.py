@@ -124,6 +124,7 @@ def make_api_infer(
     num_runs: int = 1,
     max_retries: int = 3,
     retry_delay: float = 1.0,
+    extra_body: Optional[Dict[str, Any]] = None,
 ) -> OpenAIInfer:
     resolved_key = api_key or os.getenv('DASHSCOPE_API_KEY', 'EMPTY')
     return OpenAIInfer(
@@ -138,5 +139,5 @@ def make_api_infer(
         max_retries=max_retries,
         retry_delay=retry_delay,
         enable_thinking=False,
-        extra_body={},
+        extra_body=extra_body or {},
     )

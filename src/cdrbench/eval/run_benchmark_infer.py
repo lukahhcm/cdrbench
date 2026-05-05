@@ -244,7 +244,20 @@ def _render_user_prompt(row: dict[str, Any], user_requirement: str, output_hint:
 
 def _requires_qwen_nothink(model_name: str) -> bool:
     normalized = model_name.strip().lower()
+    if _is_qwen35_family(model_name):
+        return False
     return normalized.startswith('qwen') or '/qwen' in normalized
+
+
+def _is_qwen35_family(model_name: str) -> bool:
+    normalized = re.sub(r'[^a-z0-9]+', '', model_name.strip().lower())
+    return 'qwen35' in normalized
+
+
+def _api_extra_body_for_model(model_name: str) -> dict[str, Any]:
+    if _is_qwen35_family(model_name):
+        return {'chat_template_kwargs': {'enable_thinking': False}}
+    return {}
 
 
 def _final_user_prompt(row: dict[str, Any], user_requirement: str, output_hint: str, model_name: str) -> str:
@@ -340,7 +353,11 @@ def _build_infer_backend(args: argparse.Namespace, model: str, base_url: str, ap
     host = (urlparse(base_url).hostname or '').strip().lower()
     if host in LOCAL_HOSTS:
         return make_vllm_infer(**common_kwargs)
-    return make_api_infer(**common_kwargs, api_key=api_key)
+    return make_api_infer(
+        **common_kwargs,
+        api_key=api_key,
+        extra_body=_api_extra_body_for_model(model),
+    )
 
 
 def _is_fatal_request_error(error_text: str | None) -> bool:
