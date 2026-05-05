@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 import pandas as pd
+import yaml
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -50,6 +51,24 @@ def _read_csv(path: Path) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def _read_json(path: Path) -> Any:
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def _read_yaml(path: Path) -> Any:
+    if not path.exists():
+        return None
+    try:
+        return yaml.safe_load(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
 def _track_jsonl_path(benchmark_dir: Path, track: str) -> Path:
     direct = benchmark_dir / TRACK_FILES[track]
     nested = benchmark_dir / track / TRACK_FILES[track]
@@ -64,6 +83,210 @@ def _track_csv_path(benchmark_dir: Path, track: str, filename: str) -> Path:
 
 def _safe_counter_records(counter: Counter[str], key_name: str) -> list[dict[str, Any]]:
     return [{key_name: key, "count": int(value)} for key, value in sorted(counter.items(), key=lambda item: (-item[1], item[0]))]
+
+
+def _payload_type_name(payload: Any) -> str:
+    if payload is None:
+        return "none"
+    if isinstance(payload, dict):
+        return "dict"
+    if isinstance(payload, list):
+        return "list"
+    return type(payload).__name__
+
+
+def _sample_keys_from_mapping_rows(rows: list[dict[str, Any]], *, limit: int = 30) -> list[str]:
+    keys: list[str] = []
+    seen: set[str] = set()
+    for row in rows:
+        for key in row.keys():
+            key_str = str(key)
+            if key_str not in seen:
+                seen.add(key_str)
+                keys.append(key_str)
+                if len(keys) >= limit:
+                    return keys
+    return keys
+
+
+def _sample_scalar(value: Any) -> Any:
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, dict):
+        return {str(key): _sample_scalar(val) for key, val in list(value.items())[:8]}
+    if isinstance(value, list):
+        return [_sample_scalar(item) for item in value[:8]]
+    return str(value)
+
+
+def _structured_file_summary(path: Path, root: Path) -> dict[str, Any]:
+    relative_path = str(path.relative_to(root))
+    payload: Any = None
+    file_type = path.suffix.lower().lstrip(".")
+    row_count: int | None = None
+    columns: list[str] = []
+    sample_keys: list[str] = []
+    top_level_type = "unknown"
+    sample_record: Any = None
+
+    if path.suffix.lower() == ".csv":
+        df = _read_csv(path)
+        row_count = int(len(df.index)) if not df.empty else 0
+        columns = [str(column) for column in df.columns]
+        if not df.empty:
+            sample_record = {str(key): _sample_scalar(value) for key, value in df.iloc[0].to_dict().items()}
+        top_level_type = "dataframe"
+    elif path.suffix.lower() == ".jsonl":
+        rows = _read_jsonl(path)
+        row_count = len(rows)
+        if rows and isinstance(rows[0], dict):
+            sample_keys = _sample_keys_from_mapping_rows(rows)
+            sample_record = _sample_scalar(rows[0])
+            top_level_type = "jsonl_dict_rows"
+        elif rows:
+            sample_record = _sample_scalar(rows[0])
+            top_level_type = "jsonl_rows"
+        else:
+            top_level_type = "jsonl_rows"
+    elif path.suffix.lower() == ".json":
+        payload = _read_json(path)
+        top_level_type = _payload_type_name(payload)
+        if isinstance(payload, dict):
+            sample_keys = [str(key) for key in list(payload.keys())[:30]]
+            sample_record = _sample_scalar(dict(list(payload.items())[:8]))
+        elif isinstance(payload, list):
+            row_count = len(payload)
+            if payload and isinstance(payload[0], dict):
+                sample_keys = _sample_keys_from_mapping_rows([item for item in payload if isinstance(item, dict)])
+            if payload:
+                sample_record = _sample_scalar(payload[0])
+    elif path.suffix.lower() in {".yaml", ".yml"}:
+        payload = _read_yaml(path)
+        top_level_type = _payload_type_name(payload)
+        if isinstance(payload, dict):
+            sample_keys = [str(key) for key in list(payload.keys())[:30]]
+            sample_record = _sample_scalar(dict(list(payload.items())[:8]))
+        elif isinstance(payload, list):
+            row_count = len(payload)
+            if payload and isinstance(payload[0], dict):
+                sample_keys = _sample_keys_from_mapping_rows([item for item in payload if isinstance(item, dict)])
+            if payload:
+                sample_record = _sample_scalar(payload[0])
+
+    return {
+        "root_relative_path": relative_path,
+        "file_name": path.name,
+        "parent_dir": path.parent.name,
+        "suffix": path.suffix.lower(),
+        "file_type": file_type,
+        "size_bytes": int(path.stat().st_size),
+        "row_count": row_count,
+        "columns": ",".join(columns),
+        "sample_keys": ",".join(sample_keys),
+        "top_level_type": top_level_type,
+        "sample_record": json.dumps(sample_record, ensure_ascii=False, sort_keys=True) if sample_record is not None else "",
+    }
+
+
+def _inventory_root(root: Path) -> dict[str, Any]:
+    if not root.exists():
+        return {"available": False, "root": str(root)}
+
+    all_files = sorted(path for path in root.rglob("*") if path.is_file())
+    structured_suffixes = {".csv", ".jsonl", ".json", ".yaml", ".yml"}
+    structured_files = [path for path in all_files if path.suffix.lower() in structured_suffixes]
+    file_rows = []
+    suffix_counter: Counter[str] = Counter()
+    dir_counter: Counter[str] = Counter()
+    structured_type_counter: Counter[str] = Counter()
+
+    for path in all_files:
+        suffix_counter[path.suffix.lower() or "[no_suffix]"] += 1
+        dir_counter[str(path.parent.relative_to(root))] += 1
+
+    for path in structured_files:
+        summary = _structured_file_summary(path, root)
+        file_rows.append(summary)
+        structured_type_counter[str(summary["suffix"] or "[no_suffix]")] += 1
+
+    largest_files = sorted(
+        (
+            {
+                "root_relative_path": str(path.relative_to(root)),
+                "size_bytes": int(path.stat().st_size),
+            }
+            for path in all_files
+        ),
+        key=lambda item: (-item["size_bytes"], item["root_relative_path"]),
+    )[:50]
+
+    return {
+        "available": True,
+        "root": str(root),
+        "total_file_count": len(all_files),
+        "structured_file_count": len(structured_files),
+        "suffix_counts": _safe_counter_records(suffix_counter, "suffix"),
+        "directory_file_counts": _safe_counter_records(dir_counter, "directory"),
+        "structured_suffix_counts": _safe_counter_records(structured_type_counter, "suffix"),
+        "largest_files": largest_files,
+        "file_rows": file_rows,
+    }
+
+
+def _flatten_subset_vs_full_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for track, track_payload in sorted(payload.items()):
+        rows.append(
+            {
+                "track": track,
+                "section": "overview",
+                "key": "__track__",
+                "full_count": track_payload.get("full_row_count"),
+                "subset_count": track_payload.get("subset_row_count"),
+                "selection_rate": track_payload.get("row_selection_rate"),
+                "full_identity_count": track_payload.get("full_identity_count"),
+                "subset_identity_count": track_payload.get("subset_identity_count"),
+                "identity_retention_rate": track_payload.get("identity_retention_rate"),
+            }
+        )
+        for section_name in ("domain_distribution", "type_distribution", "workflow_step_distribution", "operator_distribution"):
+            for item in track_payload.get(section_name, []):
+                category_key = next((key for key in item.keys() if key not in {"full_count", "subset_count", "selection_rate"}), "key")
+                rows.append(
+                    {
+                        "track": track,
+                        "section": section_name,
+                        "key": item.get(category_key),
+                        "full_count": item.get("full_count"),
+                        "subset_count": item.get("subset_count"),
+                        "selection_rate": item.get("selection_rate"),
+                        "full_identity_count": None,
+                        "subset_identity_count": None,
+                        "identity_retention_rate": None,
+                    }
+                )
+    return rows
+
+
+def _inventory_manifest_rows(root_name: str, inventory: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for item in inventory.get("file_rows", []):
+        rows.append({"root_name": root_name, **item})
+    return rows
+
+
+def _inventory_directory_rows(root_name: str, inventory: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for item in inventory.get("directory_file_counts", []):
+        rows.append({"root_name": root_name, **item})
+    return rows
+
+
+def _inventory_largest_file_rows(root_name: str, inventory: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for item in inventory.get("largest_files", []):
+        rows.append({"root_name": root_name, **item})
+    return rows
 
 
 def _preferred_filter_name(row: dict[str, Any]) -> str | None:
@@ -657,6 +880,9 @@ def main() -> None:
     atomic_rows, atomic_summary = _atomic_records(track_rows["atomic_ops"])
     prompt_summary = _prompt_summary(prompt_root)
     processed_summary = _processed_summary(processed_root)
+    benchmark_inventory = _inventory_root(benchmark_dir)
+    benchmark_full_inventory = _inventory_root(benchmark_full_dir) if benchmark_full_dir is not None else {"available": False}
+    processed_inventory = _inventory_root(processed_root)
 
     all_ops = set()
     for row in track_rows["main"] + track_rows["order_sensitivity"]:
@@ -693,6 +919,9 @@ def main() -> None:
         "atomic_ops": atomic_summary,
         "prompts": {key: value for key, value in prompt_summary.items() if key != "per_recipe_rows"},
         "processed": {key: value for key, value in processed_summary.items() if key != "tables"},
+        "benchmark_inventory": {key: value for key, value in benchmark_inventory.items() if key != "file_rows"},
+        "benchmark_full_inventory": {key: value for key, value in benchmark_full_inventory.items() if key != "file_rows"},
+        "processed_inventory": {key: value for key, value in processed_inventory.items() if key != "file_rows"},
     }
 
     subset_vs_full = None
@@ -708,55 +937,52 @@ def main() -> None:
     _write_csv(output_dir / "order_operator_frequency.csv", _safe_counter_records(_flatten_operator_counts(track_rows["order_sensitivity"]), "operator"))
     _write_csv(output_dir / "atomic_instance_stats.csv", atomic_rows)
     _write_csv(output_dir / "prompt_recipe_stats.csv", prompt_summary.get("per_recipe_rows") or [])
-    _write_csv(output_dir / "processed_domain_labeling_summary.csv", processed_summary.get("tables", {}).get("domain_labeling_summary", []))
-    _write_csv(output_dir / "processed_domain_operator_catalog.csv", processed_summary.get("tables", {}).get("domain_operator_catalog", []))
-    _write_csv(output_dir / "processed_domain_recipe_mining_summary.csv", processed_summary.get("tables", {}).get("domain_recipe_mining_summary", []))
-    _write_csv(output_dir / "processed_recipe_library_summary.csv", processed_summary.get("tables", {}).get("recipe_library_summary", []))
     _write_csv(
-        output_dir / "processed_domain_tag_file_counts.csv",
-        processed_summary.get("tagging", {}).get("domain_tag_file_counts", []),
+        output_dir / "benchmark_file_inventory.csv",
+        _inventory_manifest_rows("benchmark", benchmark_inventory),
     )
     _write_csv(
-        output_dir / "processed_domain_filtered_file_counts.csv",
-        processed_summary.get("tagging", {}).get("domain_filtered_file_counts", []),
+        output_dir / "processed_file_inventory.csv",
+        _inventory_manifest_rows("processed", processed_inventory),
+    )
+    if benchmark_full_dir is not None:
+        _write_csv(
+            output_dir / "benchmark_full_file_inventory.csv",
+            _inventory_manifest_rows("benchmark_full", benchmark_full_inventory),
+        )
+    _write_csv(
+        output_dir / "root_directory_counts.csv",
+        [
+            *_inventory_directory_rows("benchmark", benchmark_inventory),
+            *_inventory_directory_rows("processed", processed_inventory),
+            *(_inventory_directory_rows("benchmark_full", benchmark_full_inventory) if benchmark_full_dir is not None else []),
+        ],
     )
     _write_csv(
-        output_dir / "processed_selected_recipe_row_counts.csv",
-        processed_summary.get("recipe_mining", {}).get("selected_recipe_row_counts", []),
+        output_dir / "root_largest_files.csv",
+        [
+            *_inventory_largest_file_rows("benchmark", benchmark_inventory),
+            *_inventory_largest_file_rows("processed", processed_inventory),
+            *(_inventory_largest_file_rows("benchmark_full", benchmark_full_inventory) if benchmark_full_dir is not None else []),
+        ],
     )
     _write_csv(
-        output_dir / "processed_recipe_family_row_counts.csv",
-        processed_summary.get("recipe_mining", {}).get("recipe_family_row_counts", []),
-    )
-    _write_csv(
-        output_dir / "processed_recipe_variant_row_counts.csv",
-        processed_summary.get("recipe_library", {}).get("recipe_variant_row_counts", []),
-    )
-    _write_csv(
-        output_dir / "processed_order_family_row_counts.csv",
-        processed_summary.get("recipe_library", {}).get("order_family_row_counts", []),
-    )
-    _write_csv(
-        output_dir / "processed_checkpoint_filter_stat_row_counts.csv",
-        processed_summary.get("recipe_library", {}).get("checkpoint_filter_stat_row_counts", []),
-    )
-    _write_csv(
-        output_dir / "processed_filter_attachment_row_counts.csv",
-        processed_summary.get("recipe_library", {}).get("filter_attachment_row_counts", []),
+        output_dir / "processed_key_tables.csv",
+        [
+            *processed_summary.get("tables", {}).get("domain_labeling_summary", []),
+            *processed_summary.get("tables", {}).get("domain_operator_catalog", []),
+            *processed_summary.get("tables", {}).get("domain_recipe_mining_summary", []),
+            *processed_summary.get("tables", {}).get("recipe_library_summary", []),
+        ],
     )
     if subset_vs_full is not None:
-        for track, payload in subset_vs_full.items():
-            _write_csv(output_dir / f"{track}_subset_vs_full_domains.csv", payload["domain_distribution"])
-            _write_csv(output_dir / f"{track}_subset_vs_full_types.csv", payload["type_distribution"])
-            _write_csv(output_dir / f"{track}_subset_vs_full_steps.csv", payload["workflow_step_distribution"])
-            _write_csv(output_dir / f"{track}_subset_vs_full_operators.csv", payload["operator_distribution"])
+        _write_csv(output_dir / "subset_vs_full.csv", _flatten_subset_vs_full_rows(subset_vs_full))
 
     print(f"wrote summary -> {output_dir / 'summary.json'}", flush=True)
     print(f"wrote main stats -> {output_dir / 'main_instance_stats.csv'}", flush=True)
     print(f"wrote order stats -> {output_dir / 'order_stats.csv'}", flush=True)
     print(f"wrote atomic stats -> {output_dir / 'atomic_instance_stats.csv'}", flush=True)
-    print(f"wrote prompt stats -> {output_dir / 'prompt_recipe_stats.csv'}", flush=True)
-    print(f"wrote processed stats -> {output_dir}", flush=True)
+    print(f"wrote inventories -> {output_dir}", flush=True)
     if subset_vs_full is not None:
         print(f"wrote subset-vs-full stats -> {output_dir}", flush=True)
 
