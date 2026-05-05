@@ -228,6 +228,18 @@ def _render_user_prompt(row: dict[str, Any], user_requirement: str, output_hint:
     )
 
 
+def _requires_qwen_nothink(model_name: str) -> bool:
+    normalized = model_name.strip().lower()
+    return normalized.startswith('qwen') or '/qwen' in normalized
+
+
+def _final_user_prompt(row: dict[str, Any], user_requirement: str, output_hint: str, model_name: str) -> str:
+    prompt = _render_user_prompt(row, user_requirement, output_hint)
+    if _requires_qwen_nothink(model_name):
+        return prompt.rstrip() + "\n/nothink"
+    return prompt
+
+
 def _extract_tagged_prediction_payload(response_text: str) -> tuple[dict[str, Any] | None, str | None]:
     status_match = re.search(r'<status>\s*(KEEP|DROP)\s*</status>', response_text, flags=re.IGNORECASE | re.DOTALL)
     clean_match = re.search(r'<clean_text>(.*?)</clean_text>', response_text, flags=re.IGNORECASE | re.DOTALL)
@@ -422,7 +434,7 @@ def main() -> None:
                         'user_requirement': user_requirement,
                         'messages': [
                             {'role': 'system', 'content': system_prompt},
-                            {'role': 'user', 'content': _render_user_prompt(row, user_requirement, output_hint)},
+                            {'role': 'user', 'content': _final_user_prompt(row, user_requirement, output_hint, model)},
                         ],
                     },
                     variant_predictions,
