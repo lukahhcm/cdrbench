@@ -50,7 +50,7 @@ ALL_MODELS: list[ModelConfig] = [
     ModelConfig("openai.gpt-5.4-pro-2026-03-05", "overseas", input_field="input", need_max_tokens=True, vendor="OpenAI"),
     ModelConfig("aws.claude-sonnet-4-6", "overseas", need_max_tokens=True, vendor="Claude"),
     ModelConfig("aws.claude-opus-4-6", "overseas", need_max_tokens=True, vendor="Claude"),
-    ModelConfig("aws.claude-opus-4-5-20251101", "overseas", need_max_tokens=True, vendor="Claude"),
+    ModelConfig("vertex_ai.claude-opus-4-5-20251101", "overseas", need_max_tokens=True, vendor="Claude"),
     ModelConfig("vertex_ai.gemini-3.1-pro-preview", "overseas", input_field="contents", vendor="Gemini"),
     ModelConfig("grok-4-1-fast-reasoning", "overseas", vendor="Grok"),
     ModelConfig("z_ai.glm-5", "overseas", thinking={"type": "disabled"}, vendor="GLM"),
@@ -59,7 +59,6 @@ ALL_MODELS: list[ModelConfig] = [
     ModelConfig("deepseek-v4-pro", "domestic", thinking={"type": "disabled"}, vendor="DeepSeek"),
     ModelConfig("deepseek-v4-flash", "domestic", thinking={"type": "disabled"}, vendor="DeepSeek"),
     ModelConfig("kimi-k2.6", "domestic", enable_thinking=False, vendor="Kimi"),
-    ModelConfig("xiaomi.mimo-v2.5", "domestic", thinking={"type": "disabled"}, vendor="Xiaomi"),
 ]
 
 

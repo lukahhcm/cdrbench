@@ -43,10 +43,10 @@ API_MODEL_CONFIGS: tuple[ApiModelConfig, ...] = (
         aliases=('claude-opus-4-6', 'vertex_ai.claude-opus-4-6'),
     ),
     ApiModelConfig(
-        'aws.claude-opus-4-5-20251101',
+        'vertex_ai.claude-opus-4-5-20251101',
         'overseas',
         need_max_tokens=True,
-        aliases=('claude-opus-4-5-20251101', 'vertex_ai.claude-opus-4-5-20251101'),
+        aliases=('claude-opus-4-5-20251101', 'aws.claude-opus-4-5-20251101'),
     ),
     ApiModelConfig(
         'vertex_ai.gemini-3.1-pro-preview',
@@ -84,7 +84,6 @@ API_MODEL_CONFIGS: tuple[ApiModelConfig, ...] = (
         aliases=('moonshot.kimi-k2.6',),
     ),
     ApiModelConfig('glm-5.1', 'domestic'),
-    ApiModelConfig('xiaomi.mimo-v2.5', 'domestic'),
 )
 
 

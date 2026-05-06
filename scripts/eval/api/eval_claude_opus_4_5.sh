@@ -7,9 +7,9 @@ cd "${REPO_ROOT}"
 
 TRACKS="${TRACKS:-atomic_ops,main,order_sensitivity}"
 EVAL_ROOT="${EVAL_ROOT:-data/benchmark}"
-MODEL="${MODEL:-aws.claude-opus-4-5-20251101}"
-BASE_URL="${BASE_URL:-https://eval.dashscope.aliyuncs.com/compatible-mode/v1}"
-API_KEY="${API_KEY:-${ANTHROPIC_API_KEY:-}}"
+MODEL="${MODEL:-vertex_ai.claude-opus-4-5-20251101}"
+PROMPT_API_KEY="${PROMPT_API_KEY:-true}"
+API_KEY="${API_KEY:-}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-data/evaluation/infer/claude_opus_4_5}"
 PROMPT_VARIANT_INDICES="${PROMPT_VARIANT_INDICES:-all}"
 MAX_SAMPLES="${MAX_SAMPLES:-0}"
@@ -20,4 +20,3 @@ PROGRESS_EVERY="${PROGRESS_EVERY:-20}"
 RESUME="${RESUME:-true}"
 
 exec "${REPO_ROOT}/scripts/eval/run_model_eval.sh" "$@"
-

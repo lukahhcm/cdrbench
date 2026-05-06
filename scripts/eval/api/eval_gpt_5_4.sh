@@ -8,7 +8,7 @@ cd "${REPO_ROOT}"
 TRACKS="${TRACKS:-atomic_ops,main,order_sensitivity}"
 EVAL_ROOT="${EVAL_ROOT:-data/benchmark}"
 MODEL="${MODEL:-openai.gpt-5.4-2026-03-05}"
-BASE_URL="${BASE_URL:-https://eval.dashscope.aliyuncs.com/compatible-mode/v1}"
+PROMPT_API_KEY="${PROMPT_API_KEY:-true}"
 API_KEY="${API_KEY:-}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-data/evaluation/infer/gpt_5_4}"
 PROMPT_VARIANT_INDICES="${PROMPT_VARIANT_INDICES:-all}"
@@ -20,4 +20,3 @@ PROGRESS_EVERY="${PROGRESS_EVERY:-20}"
 RESUME="${RESUME:-true}"
 
 exec "${REPO_ROOT}/scripts/eval/run_model_eval.sh" "$@"
-

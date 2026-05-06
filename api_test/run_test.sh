@@ -17,7 +17,7 @@ OVERSEAS_MODELS=(
   "openai.gpt-5.4-pro-2026-03-05"
   "aws.claude-sonnet-4-6"
   "aws.claude-opus-4-6"
-  "aws.claude-opus-4-5-20251101"
+  "vertex_ai.claude-opus-4-5-20251101"
   "vertex_ai.gemini-3.1-pro-preview"
   "grok-4-1-fast-reasoning"
 )
@@ -32,7 +32,6 @@ DOMESTIC_MODELS=(
   "deepseek-v4-pro"
   "deepseek-v4-flash"
   "kimi-k2.6"
-  "xiaomi.mimo-v2.5"
 )
 
 ALL_MODELS=("${OVERSEAS_MODELS[@]}" "${EVAL_DOMESTIC_MODELS[@]}" "${DOMESTIC_MODELS[@]}")

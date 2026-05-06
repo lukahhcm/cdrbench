@@ -13,12 +13,19 @@ Modes:
   all     Default. Run inference first, then recompute scores from scratch.
 
 Configuration is provided by environment variables from thin model wrappers.
+For API models, leave BASE_URL unset to auto-resolve the correct endpoint from the model config.
+If PROMPT_API_KEY=true and API_KEY is empty, the script will prompt for a key before inference.
 EOF
 }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 cd "${REPO_ROOT}"
+
+PYTHON_BIN="${REPO_ROOT}/.venv-ops/bin/python"
+if [[ ! -x "${PYTHON_BIN}" ]]; then
+  PYTHON_BIN="python3"
+fi
 
 MODE="all"
 if [[ $# -gt 0 ]]; then
@@ -53,6 +60,7 @@ EVAL_ROOT="${EVAL_ROOT:-data/benchmark}"
 MODEL="${MODEL:-}"
 BASE_URL="${BASE_URL:-}"
 API_KEY="${API_KEY:-}"
+PROMPT_API_KEY="${PROMPT_API_KEY:-false}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-data/evaluation/infer}"
 PREDICTIONS_ROOT="${PREDICTIONS_ROOT:-${OUTPUT_ROOT}}"
 PROMPT_VARIANT_INDICES="${PROMPT_VARIANT_INDICES:-all}"
@@ -63,11 +71,25 @@ CONCURRENCY="${CONCURRENCY:-1}"
 PROGRESS_EVERY="${PROGRESS_EVERY:-20}"
 RESUME="${RESUME:-true}"
 
+prompt_for_api_key_if_needed() {
+  if [[ "${PROMPT_API_KEY}" != "true" || -n "${API_KEY}" ]]; then
+    return
+  fi
+  IFS= read -rsp "API key for ${MODEL}: " API_KEY
+  echo
+  if [[ -z "${API_KEY}" ]]; then
+    echo "API key cannot be empty." >&2
+    exit 1
+  fi
+}
+
 run_infer() {
   if [[ -z "${MODEL}" ]]; then
     echo "MODEL is required for infer mode." >&2
     exit 1
   fi
+
+  prompt_for_api_key_if_needed
 
   cmd=(
     "${REPO_ROOT}/scripts/infer_benchmark_tracks.sh"

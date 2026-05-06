@@ -356,180 +356,144 @@ Useful overrides:
 ./scripts/run_prompt_pipeline_all_tracks.sh --no-resume
 ```
 
-## 10. Atomic Evaluation
+## 10. Evaluation
 
-Atomic evaluation now follows a two-step recipe:
+Evaluation now uses unified per-model `eval` wrappers under:
 
-1. `infer`: call a model API and save raw outputs for all prompt variants
-2. `score`: recompute metrics from saved predictions without rerunning the model
+- `scripts/eval/api/`
+- `scripts/eval/vllm/`
 
-Run inference for `atomic_ops` only:
+The old per-model `scripts/eval/infer/*` and `scripts/eval/score/*` wrappers have been removed.
 
-```bash
-./scripts/infer_benchmark_tracks.sh \
-  --tracks atomic_ops \
-  --eval-root data/benchmark \
-  --model gpt-5.4 \
-  --base-url http://123.57.212.178:3333/v1 \
-  --output-root data/inference_runs/gpt54 \
-  --concurrency 1 \
-  --resume
-```
+Each wrapper supports three modes:
 
-Use `--concurrency 1` for remote or rate-limited external APIs unless you know the endpoint is stable under parallel requests. For local `vllm`, start with `--concurrency 8` or `--concurrency 16` and tune upward only after checking throughput and error rate.
+- `infer`: inference only
+- `score`: scoring only
+- default: run `infer` first, then `score`
 
-Then score the saved predictions:
+Behavior:
 
-```bash
-./scripts/score_benchmark_tracks.sh \
-  --tracks atomic_ops \
-  --predictions-root data/inference_runs/gpt54
-```
+- `infer` resumes from existing `predictions.jsonl`
+- when resuming, only rows whose previous result was a `request_error` are retried
+- `score` always deletes the old `score/` directory and recomputes all metrics from scratch
 
-The scorer reads `predictions.jsonl` and writes report files directly into the same per-track directory.
+### API Models
 
-If you already have an existing predictions tree, you can run the scoring step alone:
+API wrappers now follow the same routing rules as `api_test`:
+
+- endpoint URL is auto-selected from the model name
+- request payload shape is auto-selected per model family
+- if `API_KEY` is empty, the wrapper will prompt you for it before inference
+
+Example: run full evaluation for `gpt-5.4`:
 
 ```bash
-./scripts/score_benchmark_tracks.sh \
-  --tracks atomic_ops \
-  --predictions-root /path/to/inference_root
+bash scripts/eval/api/eval_gpt_5_4.sh
 ```
 
-The scorer now writes compact report files by default:
-
-- `paper_metrics.json`
-- `report.txt`
-- `summary.json`
-- `instance_metrics.jsonl`
-- `scored_variant_predictions.jsonl`
-
-For `atomic_ops` and `main`, the paper-facing metrics are `mean_rs`, `rs_at_k`, and `mean_rg` (mean bounded refinement gain).
-
-## 11. Local vLLM Serving
-
-To benchmark a local model through the same OpenAI-compatible client path, launch `vllm` first:
+Inference only:
 
 ```bash
-bash scripts/start_vllm.sh /path/to/local/model local-model 8000 0,1 2
+bash scripts/eval/api/eval_gpt_5_4.sh infer
 ```
 
-If you keep a fixed model roster, you can also use a preset launcher under `scripts/model_serve/`, for example:
+Score only:
 
 ```bash
-bash scripts/model_serve/start_vllm_qwen3_5_9b.sh
+bash scripts/eval/api/eval_gpt_5_4.sh score
 ```
 
-Then run the two-step atomic evaluation against the local server:
+Useful examples for current API roster:
 
 ```bash
-./scripts/infer_benchmark_tracks.sh \
-  --tracks atomic_ops \
-  --eval-root data/benchmark \
-  --model local-model \
-  --base-url http://127.0.0.1:8000/v1 \
-  --api-key EMPTY \
-  --output-root data/inference_runs/local_model \
-  --concurrency 16 \
-  --resume
-
-./scripts/score_benchmark_tracks.sh \
-  --tracks atomic_ops \
-  --predictions-root data/inference_runs/local_model
+bash scripts/eval/api/eval_gpt_5_4.sh
+bash scripts/eval/api/eval_gpt_5_4_pro.sh
+bash scripts/eval/api/eval_claude_sonnet_4_6.sh
+bash scripts/eval/api/eval_claude_opus_4_5.sh
+bash scripts/eval/api/eval_claude_opus_4_6.sh
+bash scripts/eval/api/eval_gemini_3_1_pro_preview.sh
+bash scripts/eval/api/eval_grok_4_1_fast_reasoning.sh
+bash scripts/eval/api/eval_glm_4_7_inner.sh
+bash scripts/eval/api/eval_glm_5.sh
+bash scripts/eval/api/eval_glm_5_1.sh
+bash scripts/eval/api/eval_kimi_k2_6.sh
+bash scripts/eval/api/eval_qwen3_6_max_preview.sh
+bash scripts/eval/api/eval_qwen3_6_plus.sh
+bash scripts/eval/api/eval_deepseek_v4_pro.sh
+bash scripts/eval/api/eval_deepseek_v4_flash.sh
 ```
 
-If you prefer fixed per-model wrappers, use the scripts under `scripts/eval/infer/{api,vllm}` and `scripts/eval/score/`, for example:
+Common overrides:
 
 ```bash
-bash scripts/eval/infer/vllm/infer_qwen3_5_9b.sh
-bash scripts/eval/score/score_qwen3_5_9b.sh
-
-bash scripts/eval/infer/api/infer_gpt_5_4.sh
-bash scripts/eval/score/score_gpt_5_4.sh
+TRACKS=atomic_ops bash scripts/eval/api/eval_gpt_5_4.sh
+TRACKS=main,order_sensitivity bash scripts/eval/api/eval_qwen3_6_plus.sh infer
+MAX_SAMPLES=100 bash scripts/eval/api/eval_deepseek_v4_pro.sh
+CONCURRENCY=1 bash scripts/eval/api/eval_claude_opus_4_5.sh
+API_KEY=<your_key> bash scripts/eval/api/eval_gpt_5_4.sh
 ```
 
-The local launcher intentionally reuses the same `ref`-style startup pattern used in earlier experiments:
+### Local vLLM Models
 
-```bash
-CUDA_VISIBLE_DEVICES=<gpu_ids> python -m vllm.entrypoints.openai.api_server \
-  --model <model_path> \
-  --served-model-name <model_name> \
-  --trust_remote_code \
-  --tensor-parallel-size <tp_size> \
-  --port <port>
-```
-
-For example, to use GPUs `4,5,6,7`:
+Start a local OpenAI-compatible server first, for example:
 
 ```bash
 bash scripts/start_vllm.sh /path/to/local/model local-model 8904 4,5,6,7 4
-
-./scripts/infer_benchmark_tracks.sh \
-  --tracks atomic_ops,main \
-  --eval-root data/benchmark \
-  --model local-model \
-  --base-url http://127.0.0.1:8904/v1 \
-  --api-key EMPTY \
-  --output-root data/evaluation/infer/local_model \
-  --concurrency 16 \
-  --resume
 ```
 
-By default, inference leaves `max_tokens` unset so the model/server default generation limit is used. The inference logs also print the maximum input length in the current run, the configured request concurrency, and per-instance request errors, which helps debug models that do not support long-context benchmark rows.
-
-If you want one script with a fixed model suite configured at the top, use:
+Then run an eval wrapper:
 
 ```bash
-./scripts/run_atomic_model_suite.sh infer
-./scripts/run_atomic_model_suite.sh score
+bash scripts/eval/vllm/eval_qwen3_5_9b.sh
+bash scripts/eval/vllm/eval_qwen3_6_27b.sh infer
+bash scripts/eval/vllm/eval_gemma4.sh score
 ```
 
-## 12. Evaluate All Tracks
+Current vLLM wrappers:
 
-If you want one command that runs model inference and scoring across `atomic_ops`, `main`, and `order_sensitivity`, use:
+- `eval_gemma4.sh`
+- `eval_llama_3_3_70b_instruct.sh`
+- `eval_llama_4_scout_17b_16e_instruct.sh`
+- `eval_qwen3_5_9b.sh`
+- `eval_qwen3_6_27b.sh`
+- `eval_qwen3_6_35b_a3b.sh`
 
-```bash
-./scripts/eval_benchmark_all_tracks.sh \
-  --model gpt-5.4 \
-  --base-url http://123.57.212.178:3333/v1 \
-  --concurrency 1 \
-  --infer-root data/eval_runs/gpt54_all
-```
+### Outputs
 
-For a local `vllm` server:
+Per-track outputs are written under the wrapper's `OUTPUT_ROOT`, for example:
 
-```bash
-./scripts/eval_benchmark_all_tracks.sh \
-  --model local-model \
-  --base-url http://127.0.0.1:8000/v1 \
-  --api-key EMPTY \
-  --concurrency 16 \
-  --infer-root data/eval_runs/local_model_all
-```
+- `data/evaluation/infer/gpt_5_4/atomic_ops/`
+- `data/evaluation/infer/gpt_5_4/main/`
+- `data/evaluation/infer/gpt_5_4/order_sensitivity/`
 
-Useful variants:
-
-```bash
-./scripts/eval_benchmark_all_tracks.sh --tracks main,order_sensitivity --resume
-./scripts/eval_benchmark_all_tracks.sh --infer-only --tracks atomic_ops
-./scripts/eval_benchmark_all_tracks.sh --score-only --predictions-root /path/to/predictions_root
-```
-
-Per-track outputs are written under the inference root:
-
-- `data/eval_runs/<run_name>/atomic_ops/`
-- `data/eval_runs/<run_name>/main/`
-- `data/eval_runs/<run_name>/order_sensitivity/`
-
-Each track writes:
+Each track contains:
 
 - `predictions.jsonl`
 - `summary.json`
-- `paper_metrics.json`
-- `report.txt`
-- `instance_metrics.jsonl`
-- `scored_variant_predictions.jsonl`
-- slice CSVs such as `by_operator.csv`, `by_source_domain.csv`, and `by_reference_status.csv`
+- `score/paper_metrics.json`
+- `score/report.txt`
+- `score/instance_metrics.jsonl`
+- `score/scored_variant_predictions.jsonl`
+- `score/by_*.csv` slice reports
+
+### Direct Driver
+
+If you want to compose your own wrapper or launch ad hoc runs, use the common driver directly:
+
+```bash
+MODEL=openai.gpt-5.4-2026-03-05 \
+OUTPUT_ROOT=data/evaluation/infer/gpt_5_4_manual \
+PROMPT_API_KEY=true \
+bash scripts/eval/run_model_eval.sh
+```
+
+Modes with the common driver:
+
+```bash
+bash scripts/eval/run_model_eval.sh infer
+bash scripts/eval/run_model_eval.sh score
+bash scripts/eval/run_model_eval.sh all
+```
 
 To render paper-ready LaTeX result tables for `atomic_ops`, `main`, and `order_sensitivity` together, run:
 
@@ -545,62 +509,7 @@ This writes:
 - `data/eval_runs/reports/main_results_table.tex`
 - `data/eval_runs/reports/order_sensitivity_results_table.tex`
 
-Outputs:
-
-- `data/benchmark_prompts/atomic_ops/recipe_prompt_library.jsonl`
-- `data/benchmark_prompts/atomic_ops/prompt_generation_summary.jsonl`
-- `data/benchmark_prompts/atomic_ops/eval/atomic_ops.jsonl`
-- `data/benchmark_prompts/atomic_ops/eval/prompt_eval_build_summary.jsonl`
-- `data/benchmark_prompts/main/recipe_prompt_library.jsonl`
-- `data/benchmark_prompts/main/prompt_generation_summary.jsonl`
-- `data/benchmark_prompts/main/eval/main.jsonl`
-- `data/benchmark_prompts/main/eval/prompt_eval_build_summary.jsonl`
-- `data/benchmark_prompts/order_sensitivity/recipe_prompt_library.jsonl`
-- `data/benchmark_prompts/order_sensitivity/prompt_generation_summary.jsonl`
-- `data/benchmark_prompts/order_sensitivity/eval/order_sensitivity.jsonl`
-- `data/benchmark_prompts/order_sensitivity/eval/prompt_eval_build_summary.jsonl`
-
-The actual model prompt should be assembled by evaluation code:
-
-```text
-{{LLM-generated user requirement}}
-
-{{fixed CDR-Bench output contract}}
-
-Raw input text:
-<<<CDR_INPUT
-{{input_text}}
-CDR_INPUT>>>
-```
-
-This means natural-language diversity comes from the requirement body, while the output protocol remains fixed across all styles.
-
-The default generation flow hides operator names and parameter names from the user-facing requirement, while still preserving:
-
-- `data/processed/recipe_library/<domain>/recipe_library.yaml`
-- `configs/recipe_prompting.yaml`
-- `data/benchmark/*.jsonl`
-
-The generated requirement candidates should preserve:
-
-- the user-facing refinement goal
-- the required order when order matters
-- natural threshold semantics when needed
-- stylistic diversity across different users
-
-Current style pool includes imperative checklist, goal-oriented description, application-context task, quality-control request, analyst handoff, concise brief, policy-like requirement, recipe narrative, end-weighted instruction, negative-constraint driven, and conversational cooperative styles.
-
-By default, prompt generation skips recipes containing `flagged_words_filter` and `stopwords_filter`.
-
-Notes:
-
-- Prompt generation is grouped by recipe signature rather than by individual sample, so all samples sharing the same recipe reuse the same accepted prompt pool.
-- Each sample keeps a deterministic subset of `3` accepted prompt styles for direct evaluation.
-- `prompt_generation_summary.jsonl` is the check file for accepted prompt-pool coverage.
-- `prompt_eval_build_summary.jsonl` is the check file for final eval-row coverage.
-- `--resume` reuses the recipe-level cache so interrupted runs can continue without starting from scratch.
-
-## 10. Troubleshooting Data-Juicer Imports
+## 11. Troubleshooting Data-Juicer Imports
 
 If tagging fails with errors such as:
 
