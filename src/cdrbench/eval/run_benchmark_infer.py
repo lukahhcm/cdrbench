@@ -242,13 +242,6 @@ def _render_user_prompt(row: dict[str, Any], user_requirement: str, output_hint:
     )
 
 
-def _requires_qwen_nothink(model_name: str) -> bool:
-    normalized = model_name.strip().lower()
-    if _is_qwen35_family(model_name):
-        return False
-    return normalized.startswith('qwen') or '/qwen' in normalized
-
-
 def _is_qwen35_family(model_name: str) -> bool:
     normalized = re.sub(r'[^a-z0-9]+', '', model_name.strip().lower())
     return 'qwen35' in normalized
@@ -261,10 +254,7 @@ def _api_extra_body_for_model(model_name: str) -> dict[str, Any]:
 
 
 def _final_user_prompt(row: dict[str, Any], user_requirement: str, output_hint: str, model_name: str) -> str:
-    prompt = _render_user_prompt(row, user_requirement, output_hint)
-    if _requires_qwen_nothink(model_name):
-        return prompt.rstrip() + "\n/nothink"
-    return prompt
+    return _render_user_prompt(row, user_requirement, output_hint)
 
 
 def _extract_tagged_prediction_payload(response_text: str) -> tuple[dict[str, Any] | None, str | None]:
