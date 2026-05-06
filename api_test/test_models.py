@@ -53,17 +53,16 @@ ALL_MODELS: list[ModelConfig] = [
     ModelConfig("aws.claude-sonnet-4-6", "overseas", need_max_tokens=True, vendor="Claude"),
     ModelConfig("aws.claude-opus-4-6", "overseas", need_max_tokens=True, vendor="Claude"),
     ModelConfig("aws.claude-opus-4-5-20251101", "overseas", need_max_tokens=True, vendor="Claude"),
-    ModelConfig("ai_studio.gemini-3.1-pro-preview", "overseas", input_field="contents", vendor="Gemini"),
+    ModelConfig("vertex_ai.gemini-3.1-pro-preview", "overseas", input_field="contents", vendor="Gemini"),
     ModelConfig("vertex_ai.gemini-3-pro-preview", "overseas", input_field="contents", vendor="Gemini"),
-    ModelConfig("ai_studio.gemini-3-pro-image-preview", "overseas", input_field="contents", vendor="Gemini"),
     ModelConfig("grok-4-1-fast-non-reasoning", "overseas", vendor="Grok"),
     ModelConfig("z_ai.glm-5", "overseas", vendor="GLM"),
-    ModelConfig("moonshot.kimi-k2.5", "overseas", enable_thinking=False, vendor="Kimi"),
+    ModelConfig("kimi-k2.5", "overseas", enable_thinking=False, vendor="Kimi"),
     ModelConfig("qwen3.6-max-preview", "domestic", enable_thinking=False, vendor="Qwen"),
     ModelConfig("qwen3.6-plus", "domestic", enable_thinking=False, vendor="Qwen"),
-    ModelConfig("deepseek.deepseek-v4-pro", "domestic", vendor="DeepSeek"),
-    ModelConfig("deepseek.deepseek-v4-flash", "domestic", vendor="DeepSeek"),
-    ModelConfig("moonshot.kimi-k2.6", "domestic", enable_thinking=False, vendor="Kimi"),
+    ModelConfig("deepseek-v4-pro", "domestic", vendor="DeepSeek"),
+    ModelConfig("deepseek-v4-flash", "domestic", vendor="DeepSeek"),
+    ModelConfig("kimi-k2.6", "domestic", enable_thinking=False, vendor="Kimi"),
     ModelConfig("minimax.MiniMax-M2.7", "domestic", vendor="MiniMax"),
     ModelConfig("xiaomi.mimo-v2.5", "domestic", vendor="Xiaomi"),
 ]
@@ -109,8 +108,8 @@ def expand_model_configs(model_name: str, lookup: dict[str, ModelConfig]) -> lis
     normalized = model_name.strip().lower()
     if normalized in {
         "z_ai.glm-5",
-        "deepseek.deepseek-v4-pro",
-        "deepseek.deepseek-v4-flash",
+        "deepseek-v4-pro",
+        "deepseek-v4-flash",
         "minimax.minimax-m2.7",
         "xiaomi.mimo-v2.5",
     }:

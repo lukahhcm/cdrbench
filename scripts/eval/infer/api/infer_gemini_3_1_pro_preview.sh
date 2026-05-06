@@ -7,7 +7,7 @@ cd "${REPO_ROOT}"
 
 TRACKS="${TRACKS:-atomic_ops,main,order_sensitivity}"
 EVAL_ROOT="${EVAL_ROOT:-data/benchmark}"
-MODEL="${MODEL:-ai_studio.gemini-3.1-pro-preview}"
+MODEL="${MODEL:-vertex_ai.gemini-3.1-pro-preview}"
 BASE_URL="${BASE_URL:-https://eval.dashscope.aliyuncs.com/compatible-mode/v1}"
 API_KEY="${API_KEY:-}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-data/evaluation/infer/gemini_3_1_pro_preview}"

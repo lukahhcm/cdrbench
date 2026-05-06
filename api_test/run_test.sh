@@ -18,23 +18,22 @@ OVERSEAS_MODELS=(
   "aws.claude-sonnet-4-6"
   "aws.claude-opus-4-6"
   "aws.claude-opus-4-5-20251101"
-  "ai_studio.gemini-3.1-pro-preview"
+  "vertex_ai.gemini-3.1-pro-preview"
   "vertex_ai.gemini-3-pro-preview"
-  "ai_studio.gemini-3-pro-image-preview"
   "grok-4-1-fast-non-reasoning"
 )
 
 EVAL_DOMESTIC_MODELS=(
   "z_ai.glm-5"
-  "moonshot.kimi-k2.5"
+  "kimi-k2.5"
 )
 
 DOMESTIC_MODELS=(
   "qwen3.6-max-preview"
   "qwen3.6-plus"
-  "deepseek.deepseek-v4-pro"
-  "deepseek.deepseek-v4-flash"
-  "moonshot.kimi-k2.6"
+  "deepseek-v4-pro"
+  "deepseek-v4-flash"
+  "kimi-k2.6"
   "minimax.MiniMax-M2.7"
   "xiaomi.mimo-v2.5"
 )

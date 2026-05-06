@@ -49,21 +49,16 @@ API_MODEL_CONFIGS: tuple[ApiModelConfig, ...] = (
         aliases=('claude-opus-4-5-20251101', 'vertex_ai.claude-opus-4-5-20251101'),
     ),
     ApiModelConfig(
-        'ai_studio.gemini-3.1-pro-preview',
+        'vertex_ai.gemini-3.1-pro-preview',
         'overseas',
         input_field='contents',
-        aliases=('gemini-3.1-pro-preview', 'vertex_ai.gemini-3.1-pro-preview'),
+        aliases=('gemini-3.1-pro-preview', 'ai_studio.gemini-3.1-pro-preview'),
     ),
     ApiModelConfig(
         'vertex_ai.gemini-3-pro-preview',
         'overseas',
         input_field='contents',
         aliases=('gemini-3-pro-preview',),
-    ),
-    ApiModelConfig(
-        'ai_studio.gemini-3-pro-image-preview',
-        'overseas',
-        input_field='contents',
     ),
     ApiModelConfig(
         'grok-4-1-fast-non-reasoning',
@@ -78,26 +73,26 @@ API_MODEL_CONFIGS: tuple[ApiModelConfig, ...] = (
         aliases=('glm-5',),
     ),
     ApiModelConfig(
-        'moonshot.kimi-k2.5',
+        'kimi-k2.5',
         'overseas',
-        aliases=('kimi-k2.5',),
+        aliases=('moonshot.kimi-k2.5',),
     ),
     ApiModelConfig('qwen3.6-max-preview', 'domestic'),
     ApiModelConfig('qwen3.6-plus', 'domestic'),
     ApiModelConfig(
-        'deepseek.deepseek-v4-pro',
+        'deepseek-v4-pro',
         'domestic',
-        aliases=('deepseek-v4-pro',),
+        aliases=('deepseek.deepseek-v4-pro',),
     ),
     ApiModelConfig(
-        'deepseek.deepseek-v4-flash',
+        'deepseek-v4-flash',
         'domestic',
-        aliases=('deepseek-v4-flash', 'deepseek_v4_flash'),
+        aliases=('deepseek.deepseek-v4-flash', 'deepseek_v4_flash'),
     ),
     ApiModelConfig(
-        'moonshot.kimi-k2.6',
+        'kimi-k2.6',
         'domestic',
-        aliases=('kimi-k2.6',),
+        aliases=('moonshot.kimi-k2.6',),
     ),
     ApiModelConfig('glm-5.1', 'domestic'),
     ApiModelConfig(

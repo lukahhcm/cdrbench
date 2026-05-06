@@ -7,7 +7,7 @@ cd "${REPO_ROOT}"
 
 TRACKS="${TRACKS:-atomic_ops,main,order_sensitivity}"
 EVAL_ROOT="${EVAL_ROOT:-data/benchmark}"
-MODEL="${MODEL:-deepseek.deepseek-v4-pro}"
+MODEL="${MODEL:-deepseek-v4-pro}"
 BASE_URL="${BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}"
 API_KEY="${API_KEY:-}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-data/evaluation/infer/deepseek_v4_pro}"
