@@ -5,9 +5,14 @@ import os
 import re
 from typing import Any
 
+from cdrbench.infer.api_model_config import (
+    DOMESTIC_BASE_URL,
+    default_base_url_for_model,
+    resolve_api_model_name,
+)
 
-DEFAULT_BASE_URL = "http://123.57.212.178:3333/v1"
-DEFAULT_MODEL = "gpt-5.4"
+DEFAULT_BASE_URL = DOMESTIC_BASE_URL
+DEFAULT_MODEL = "openai.gpt-5.4-2026-03-05"
 
 
 def resolve_api_key(explicit: str | None = None) -> str:
@@ -17,15 +22,26 @@ def resolve_api_key(explicit: str | None = None) -> str:
     return api_key
 
 
-def resolve_base_url(explicit: str | None = None) -> str:
-    return explicit or os.getenv("OPENAI_BASE_URL") or os.getenv("LLM_BASE_URL") or DEFAULT_BASE_URL
+def resolve_base_url(explicit: str | None = None, model: str | None = None) -> str:
+    return (
+        explicit
+        or os.getenv("OPENAI_BASE_URL")
+        or os.getenv("LLM_BASE_URL")
+        or default_base_url_for_model(model or DEFAULT_MODEL)
+        or DEFAULT_BASE_URL
+    )
 
 
 def resolve_model(explicit: str | None = None) -> str:
-    return explicit or os.getenv("OPENAI_MODEL") or os.getenv("LLM_MODEL") or DEFAULT_MODEL
+    candidate = explicit or os.getenv("OPENAI_MODEL") or os.getenv("LLM_MODEL") or DEFAULT_MODEL
+    return resolve_api_model_name(candidate, default=DEFAULT_MODEL)
 
 
-def build_client(api_key: str | None = None, base_url: str | None = None) -> Any:
+def build_client(
+    api_key: str | None = None,
+    base_url: str | None = None,
+    model: str | None = None,
+) -> Any:
     try:
         from openai import OpenAI
     except ImportError as exc:
@@ -33,7 +49,10 @@ def build_client(api_key: str | None = None, base_url: str | None = None) -> Any
             "The openai package is required for LLM-backed prompt generation/judging. "
             "Install project dependencies with `python -m pip install -e .`."
         ) from exc
-    return OpenAI(api_key=resolve_api_key(api_key), base_url=resolve_base_url(base_url))
+    return OpenAI(
+        api_key=resolve_api_key(api_key),
+        base_url=resolve_base_url(base_url, model=model),
+    )
 
 
 def chat_completion(

@@ -5,14 +5,22 @@ OpenAI-compatible inference backend shared by local vLLM and remote APIs.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import time
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
+import requests
 from openai import OpenAI
 
 from .base import BaseInfer
+from .api_model_config import (
+    DEFAULT_COMPAT_MAX_TOKENS,
+    default_base_url_for_model,
+    get_api_model_config,
+)
 
 logging.getLogger('httpx').setLevel(logging.WARNING)
 logging.getLogger('httpcore').setLevel(logging.WARNING)
@@ -85,6 +93,199 @@ class OpenAIInfer(BaseInfer):
         )
 
 
+class CompatApiInfer(BaseInfer):
+    def __init__(
+        self,
+        model: str,
+        api_base: str,
+        api_key: str,
+        concurrency: int = 8,
+        max_tokens: int = 0,
+        temperature: float = 0.0,
+        top_p: float = 0.0,
+        num_runs: int = 1,
+        max_retries: int = 3,
+        retry_delay: float = 1.0,
+        timeout: float = 300.0,
+        extra_body: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        resolved_model = model.strip()
+        self._model_config = get_api_model_config(resolved_model)
+        if self._model_config is not None:
+            resolved_model = self._model_config.model_name
+        super().__init__(
+            model=resolved_model,
+            concurrency=concurrency,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            num_runs=num_runs,
+        )
+        self.max_retries = max_retries
+        self.retry_delay = retry_delay
+        self.timeout = timeout
+        self._api_key = api_key
+        self._extra_body: Dict[str, Any] = extra_body or {}
+        self._request_url = self._normalize_request_url(api_base)
+
+    @staticmethod
+    def _normalize_request_url(api_base: str) -> str:
+        base = api_base.rstrip('/')
+        if base.endswith('/chat/completions'):
+            return base
+        return f'{base}/chat/completions'
+
+    @staticmethod
+    def _stringify_content(content: Any) -> str:
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts: list[str] = []
+            for item in content:
+                if isinstance(item, dict):
+                    text = item.get('text')
+                    if text is not None:
+                        parts.append(str(text))
+                    else:
+                        parts.append(json.dumps(item, ensure_ascii=False))
+                else:
+                    parts.append(str(item))
+            return ''.join(parts)
+        if content is None:
+            return ''
+        return str(content)
+
+    def _build_input_messages(self, messages: List[dict[str, Any]]) -> list[dict[str, str]]:
+        payload_messages: list[dict[str, str]] = []
+        for message in messages:
+            payload_messages.append(
+                {
+                    'role': str(message.get('role') or 'user'),
+                    'content': self._stringify_content(message.get('content')),
+                }
+            )
+        return payload_messages
+
+    def _build_contents_messages(self, messages: List[dict[str, Any]]) -> list[dict[str, Any]]:
+        parts: list[str] = []
+        for message in messages:
+            role = str(message.get('role') or 'user').strip().lower()
+            text = self._stringify_content(message.get('content')).strip()
+            if not text:
+                continue
+            if role == 'system':
+                parts.append(f'System instruction:\n{text}')
+            elif role == 'user':
+                parts.append(f'User request:\n{text}')
+            else:
+                parts.append(f'{role}:\n{text}')
+        combined_text = '\n\n'.join(parts).strip()
+        return [{'role': 'user', 'parts': [{'text': combined_text}]}]
+
+    def _build_payload(self, messages: List[dict[str, Any]]) -> dict[str, Any]:
+        input_field = self._model_config.input_field if self._model_config is not None else 'messages'
+        payload: dict[str, Any] = {'model': self.model}
+
+        if input_field == 'input':
+            payload['input'] = self._build_input_messages(messages)
+        elif input_field == 'contents':
+            payload['contents'] = self._build_contents_messages(messages)
+        else:
+            payload['messages'] = self._build_input_messages(messages)
+
+        payload['temperature'] = self.temperature
+        if self.top_p > 0:
+            payload['top_p'] = self.top_p
+        if self.max_tokens > 0:
+            payload['max_tokens'] = self.max_tokens
+        elif self._model_config is not None and self._model_config.need_max_tokens:
+            payload['max_tokens'] = DEFAULT_COMPAT_MAX_TOKENS
+        if self._extra_body:
+            payload.update(self._extra_body)
+        return payload
+
+    @classmethod
+    def _extract_text(cls, response_json: dict[str, Any]) -> str:
+        choices = response_json.get('choices')
+        if isinstance(choices, list) and choices:
+            choice = choices[0]
+            if isinstance(choice, dict):
+                message = choice.get('message')
+                if isinstance(message, dict):
+                    content = message.get('content')
+                    return cls._stringify_content(content)
+
+        content = response_json.get('content')
+        if isinstance(content, list):
+            parts = [str(item.get('text', '')) for item in content if isinstance(item, dict) and item.get('type') == 'text']
+            if parts:
+                return ''.join(parts)
+
+        candidates = response_json.get('candidates')
+        if isinstance(candidates, list) and candidates:
+            candidate = candidates[0]
+            if isinstance(candidate, dict):
+                candidate_content = candidate.get('content')
+                if isinstance(candidate_content, dict):
+                    parts = candidate_content.get('parts')
+                    if isinstance(parts, list):
+                        return ''.join(str(part.get('text', '')) for part in parts if isinstance(part, dict))
+
+        output = response_json.get('output')
+        if isinstance(output, dict):
+            text = output.get('text')
+            if text is not None:
+                return str(text)
+            output_choices = output.get('choices')
+            if isinstance(output_choices, list) and output_choices:
+                first_choice = output_choices[0]
+                if isinstance(first_choice, dict):
+                    message = first_choice.get('message')
+                    if isinstance(message, dict):
+                        return cls._stringify_content(message.get('content'))
+
+        return json.dumps(response_json, ensure_ascii=False)
+
+    def _call_once(self, messages: List[dict]) -> str:
+        last_exc: Exception = RuntimeError('no attempts made')
+        delay = self.retry_delay
+        payload = self._build_payload(messages)
+        headers = {
+            'Authorization': f'Bearer {self._api_key}',
+            'Content-Type': 'application/json',
+        }
+
+        for attempt in range(max(1, self.max_retries)):
+            try:
+                response = requests.post(
+                    self._request_url,
+                    headers=headers,
+                    json=payload,
+                    timeout=self.timeout,
+                )
+                if response.status_code != 200:
+                    raise RuntimeError(
+                        f'HTTP {response.status_code} url={self._request_url} body={response.text}'
+                    )
+                return self._extract_text(response.json())
+            except Exception as exc:
+                last_exc = exc
+                if attempt < self.max_retries - 1:
+                    time.sleep(delay)
+                    delay *= 2
+
+        raise last_exc
+
+    def __repr__(self) -> str:
+        host = urlparse(self._request_url).hostname or 'unknown'
+        return (
+            f'CompatApiInfer(model={self.model!r}, '
+            f'host={host!r}, '
+            f'concurrency={self.concurrency}, '
+            f'num_runs={self.num_runs})'
+        )
+
+
 def make_vllm_infer(
     model: str,
     api_base: str = 'http://127.0.0.1:8901/v1',
@@ -115,7 +316,7 @@ def make_vllm_infer(
 
 def make_api_infer(
     model: str,
-    api_base: str = 'http://123.57.212.178:3333/v1',
+    api_base: str = '',
     api_key: str = '',
     concurrency: int = 8,
     max_tokens: int = 0,
@@ -125,11 +326,12 @@ def make_api_infer(
     max_retries: int = 3,
     retry_delay: float = 1.0,
     extra_body: Optional[Dict[str, Any]] = None,
-) -> OpenAIInfer:
+) -> CompatApiInfer:
     resolved_key = api_key or os.getenv('DASHSCOPE_API_KEY', 'EMPTY')
-    return OpenAIInfer(
+    resolved_base = api_base or default_base_url_for_model(model) or 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+    return CompatApiInfer(
         model=model,
-        api_base=api_base,
+        api_base=resolved_base,
         api_key=resolved_key,
         concurrency=concurrency,
         max_tokens=max_tokens,
@@ -138,6 +340,5 @@ def make_api_infer(
         num_runs=num_runs,
         max_retries=max_retries,
         retry_delay=retry_delay,
-        enable_thinking=False,
         extra_body=extra_body or {},
     )

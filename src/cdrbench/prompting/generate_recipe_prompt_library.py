@@ -926,10 +926,15 @@ def main() -> None:
 
     generation_model = resolve_model(args.model)
     judge_model = resolve_model(args.judge_model or args.model)
-    generation_client = build_client(api_key=args.api_key, base_url=args.base_url) if args.prompt_source == 'llm' else None
+    generation_client = build_client(
+        api_key=args.api_key,
+        base_url=args.base_url,
+        model=generation_model,
+    ) if args.prompt_source == 'llm' else None
     judge_client = build_client(
         api_key=args.judge_api_key or args.api_key,
         base_url=args.judge_base_url or args.base_url,
+        model=judge_model,
     )
 
     cache_path = (ROOT / args.cache_path).resolve()

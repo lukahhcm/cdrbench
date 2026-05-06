@@ -450,9 +450,9 @@ def main() -> None:
     if args.max_input_chars > 0:
         rows = [row for row in rows if _row_input_length_chars(row) <= args.max_input_chars]
 
-    base_url = resolve_base_url(args.base_url)
-    api_key = _resolved_api_key(args.api_key, base_url)
     model = resolve_model(args.model)
+    base_url = resolve_base_url(args.base_url, model=model)
+    api_key = _resolved_api_key(args.api_key, base_url)
     infer_backend = _build_infer_backend(args, model, base_url, api_key)
 
     existing_rows_by_id: dict[str, dict[str, Any]] = {}

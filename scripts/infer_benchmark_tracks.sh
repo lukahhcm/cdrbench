@@ -36,8 +36,8 @@ Options:
 
 Examples:
   ./scripts/infer_benchmark_tracks.sh \
-    --model gpt-5.4 \
-    --base-url http://123.57.212.178:3333/v1 \
+    --model openai.gpt-5.4-2026-03-05 \
+    --base-url https://eval.dashscope.aliyuncs.com/compatible-mode/v1 \
     --output-root data/evaluation/infer/gpt54
 
   ./scripts/infer_benchmark_tracks.sh \

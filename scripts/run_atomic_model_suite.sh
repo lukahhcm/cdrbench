@@ -75,8 +75,8 @@ DEFAULT_API_KEY="${DEFAULT_API_KEY:-}"
 # - base_url/api_key can be left empty to inherit DEFAULT_BASE_URL/DEFAULT_API_KEY
 # - to add a model, just append one new line
 MODELS=(
-  "gpt_5_4|gpt-5.4||"
-  "gemini_3_1_pro|gemini-3.1-pro-preview||"
+  "gpt_5_4|openai.gpt-5.4-2026-03-05||"
+  "gemini_3_1_pro|vertex_ai.gemini-3.1-pro-preview||"
   "qwen3_6_plus|qwen3.6-plus||"
 )
 

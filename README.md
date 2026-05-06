@@ -438,14 +438,14 @@ Then run the two-step atomic evaluation against the local server:
   --predictions-root data/inference_runs/local_model
 ```
 
-If you prefer fixed per-model wrappers, use the scripts under `scripts/evaluation/`, for example:
+If you prefer fixed per-model wrappers, use the scripts under `scripts/eval/infer/{api,vllm}` and `scripts/eval/score/`, for example:
 
 ```bash
-bash scripts/evaluation/infer_qwen3_5_9b.sh
-bash scripts/evaluation/score_qwen3_5_9b.sh
+bash scripts/eval/infer/vllm/infer_qwen3_5_9b.sh
+bash scripts/eval/score/score_qwen3_5_9b.sh
 
-bash scripts/evaluation/infer_gpt_5_4.sh
-bash scripts/evaluation/score_gpt_5_4.sh
+bash scripts/eval/infer/api/infer_gpt_5_4.sh
+bash scripts/eval/score/score_gpt_5_4.sh
 ```
 
 The local launcher intentionally reuses the same `ref`-style startup pattern used in earlier experiments:
