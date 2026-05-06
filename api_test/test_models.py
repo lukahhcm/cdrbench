@@ -143,6 +143,16 @@ def extract_content(data: dict[str, Any]) -> str:
         if "message" in choice:
             return choice["message"].get("content", "")
 
+    if "message" in data and isinstance(data["message"], dict):
+        message = data["message"]
+        content = message.get("content")
+        if isinstance(content, list):
+            parts = [part.get("text", "") for part in content if isinstance(part, dict) and part.get("type") == "text"]
+            if parts:
+                return "".join(parts)
+        if isinstance(content, str):
+            return content
+
     if "content" in data and isinstance(data["content"], list):
         parts = [part.get("text", "") for part in data["content"] if part.get("type") == "text"]
         return "".join(parts)
@@ -177,12 +187,15 @@ def extract_stream_chunk_content(data: dict[str, Any]) -> str:
                 return str(content)
         if "message" in choice:
             return choice["message"].get("content", "")
+    if "message" in data and isinstance(data["message"], dict):
+        return extract_content(data)
     return extract_content(data)
 
 
 def extract_streaming_response(response: requests.Response) -> tuple[str, list[str]]:
     parts: list[str] = []
     raw_keys: list[str] = []
+    last_snapshot_text = ""
     for raw_line in response.iter_lines(decode_unicode=True):
         if not raw_line:
             continue
@@ -195,10 +208,17 @@ def extract_streaming_response(response: requests.Response) -> tuple[str, list[s
         payload = json.loads(data_str)
         if not raw_keys:
             raw_keys = list(payload.keys())
+        if "message" in payload and isinstance(payload["message"], dict):
+            snapshot_text = extract_content(payload)
+            if snapshot_text:
+                last_snapshot_text = snapshot_text
+            continue
         chunk = extract_stream_chunk_content(payload)
         if chunk:
             parts.append(chunk)
-    return "".join(parts), raw_keys
+    if parts:
+        return "".join(parts), raw_keys
+    return last_snapshot_text, raw_keys
 
 
 def load_prompt_config(path: Path) -> dict[str, Any]:

@@ -231,6 +231,13 @@ class CompatApiInfer(BaseInfer):
         return payload
 
     @classmethod
+    def _extract_text_from_message_object(cls, message: dict[str, Any]) -> str:
+        content = message.get('content')
+        if content is None:
+            return ''
+        return cls._stringify_content(content)
+
+    @classmethod
     def _extract_text(cls, response_json: dict[str, Any]) -> str:
         choices = response_json.get('choices')
         if isinstance(choices, list) and choices:
@@ -240,6 +247,12 @@ class CompatApiInfer(BaseInfer):
                 if isinstance(message, dict):
                     content = message.get('content')
                     return cls._stringify_content(content)
+
+        message = response_json.get('message')
+        if isinstance(message, dict):
+            message_text = cls._extract_text_from_message_object(message)
+            if message_text:
+                return message_text
 
         content = response_json.get('content')
         if isinstance(content, list):
@@ -289,11 +302,18 @@ class CompatApiInfer(BaseInfer):
                     if content is not None:
                         return cls._stringify_content(content)
 
+        message = response_json.get('message')
+        if isinstance(message, dict):
+            message_text = cls._extract_text_from_message_object(message)
+            if message_text:
+                return message_text
+
         return cls._extract_text(response_json)
 
     @classmethod
     def _extract_streaming_response_text(cls, response: requests.Response) -> str:
         parts: list[str] = []
+        last_snapshot_text = ''
         for raw_line in response.iter_lines(decode_unicode=True):
             if not raw_line:
                 continue
@@ -304,10 +324,17 @@ class CompatApiInfer(BaseInfer):
             if not data or data == '[DONE]':
                 continue
             payload = json.loads(data)
+            if isinstance(payload.get('message'), dict):
+                snapshot_text = cls._extract_text(payload)
+                if snapshot_text:
+                    last_snapshot_text = snapshot_text
+                continue
             chunk_text = cls._extract_stream_chunk_text(payload)
             if chunk_text:
                 parts.append(chunk_text)
-        return ''.join(parts)
+        if parts:
+            return ''.join(parts)
+        return last_snapshot_text
 
     def _call_once(self, messages: List[dict]) -> str:
         last_exc: Exception = RuntimeError('no attempts made')
