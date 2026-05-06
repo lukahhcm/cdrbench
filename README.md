@@ -413,9 +413,7 @@ bash scripts/eval/api/eval_claude_opus_4_5.sh
 bash scripts/eval/api/eval_claude_opus_4_6.sh
 bash scripts/eval/api/eval_gemini_3_1_pro_preview.sh
 bash scripts/eval/api/eval_grok_4_1_fast_reasoning.sh
-bash scripts/eval/api/eval_glm_4_7_inner.sh
 bash scripts/eval/api/eval_glm_5.sh
-bash scripts/eval/api/eval_glm_5_1.sh
 bash scripts/eval/api/eval_kimi_k2_6.sh
 bash scripts/eval/api/eval_qwen3_6_max_preview.sh
 bash scripts/eval/api/eval_qwen3_6_plus.sh
