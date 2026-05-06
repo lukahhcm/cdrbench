@@ -207,7 +207,8 @@ class CompatApiInfer(BaseInfer):
 
     def _build_payload(self, messages: List[dict[str, Any]]) -> dict[str, Any]:
         input_field = self._model_config.input_field if self._model_config is not None else 'messages'
-        payload: dict[str, Any] = {'model': self.model, 'stream': True}
+        stream = True if self._model_config is None else self._model_config.stream
+        payload: dict[str, Any] = {'model': self.model, 'stream': stream}
         effective_messages = messages
 
         if self._model_config is not None and self._model_config.top_level_system:
@@ -256,7 +257,7 @@ class CompatApiInfer(BaseInfer):
 
         content = response_json.get('content')
         if isinstance(content, list):
-            parts = [str(item.get('text', '')) for item in content if isinstance(item, dict) and item.get('type') == 'text']
+            parts = [str(item.get('text', '')) for item in content if isinstance(item, dict) and item.get('text') is not None]
             if parts:
                 return ''.join(parts)
 
@@ -268,7 +269,7 @@ class CompatApiInfer(BaseInfer):
                 if isinstance(candidate_content, dict):
                     parts = candidate_content.get('parts')
                     if isinstance(parts, list):
-                        return ''.join(str(part.get('text', '')) for part in parts if isinstance(part, dict))
+                        return ''.join(str(part.get('text', '')) for part in parts if isinstance(part, dict) and part.get('text') is not None)
 
         output = response_json.get('output')
         if isinstance(output, dict):
@@ -347,17 +348,20 @@ class CompatApiInfer(BaseInfer):
 
         for attempt in range(max(1, self.max_retries)):
             try:
+                request_stream = bool(payload.get('stream', True))
                 with requests.post(
                     self._request_url,
                     headers=headers,
                     json=payload,
                     timeout=self.timeout,
-                    stream=True,
+                    stream=request_stream,
                 ) as response:
                     if response.status_code != 200:
                         raise RuntimeError(
                             f'HTTP {response.status_code} url={self._request_url} body={response.text}'
                         )
+                    if not request_stream:
+                        return self._extract_text(response.json())
                     content_type = (response.headers.get('Content-Type') or '').lower()
                     if 'text/event-stream' in content_type:
                         return self._extract_streaming_response_text(response)

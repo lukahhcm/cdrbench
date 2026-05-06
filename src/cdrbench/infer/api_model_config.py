@@ -13,6 +13,7 @@ class ApiModelConfig:
     model_name: str
     endpoint: str
     input_field: str = 'messages'
+    stream: bool = True
     top_level_system: bool = False
     need_max_tokens: bool = False
     aliases: tuple[str, ...] = ()
@@ -34,6 +35,7 @@ API_MODEL_CONFIGS: tuple[ApiModelConfig, ...] = (
     ApiModelConfig(
         'aws.claude-sonnet-4-6',
         'overseas',
+        stream=False,
         top_level_system=True,
         need_max_tokens=True,
         aliases=('claude-sonnet-4-6', 'vertex_ai.claude-sonnet-4-6'),
@@ -41,6 +43,7 @@ API_MODEL_CONFIGS: tuple[ApiModelConfig, ...] = (
     ApiModelConfig(
         'aws.claude-opus-4-6',
         'overseas',
+        stream=False,
         top_level_system=True,
         need_max_tokens=True,
         aliases=('claude-opus-4-6', 'vertex_ai.claude-opus-4-6'),
@@ -48,6 +51,7 @@ API_MODEL_CONFIGS: tuple[ApiModelConfig, ...] = (
     ApiModelConfig(
         'vertex_ai.claude-opus-4-5-20251101',
         'overseas',
+        stream=False,
         top_level_system=True,
         need_max_tokens=True,
         aliases=('claude-opus-4-5-20251101', 'aws.claude-opus-4-5-20251101'),

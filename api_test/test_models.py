@@ -37,6 +37,7 @@ class ModelConfig:
     model_name: str
     endpoint: str
     input_field: str = "messages"
+    stream: bool = True
     top_level_system: bool = False
     need_max_tokens: bool = False
     enable_thinking: bool | None = None
@@ -49,9 +50,9 @@ class ModelConfig:
 ALL_MODELS: list[ModelConfig] = [
     ModelConfig("openai.gpt-5.4-2026-03-05", "overseas", vendor="OpenAI"),
     ModelConfig("openai.gpt-5.4-pro-2026-03-05", "overseas", input_field="input", need_max_tokens=True, vendor="OpenAI"),
-    ModelConfig("aws.claude-sonnet-4-6", "overseas", top_level_system=True, need_max_tokens=True, vendor="Claude"),
-    ModelConfig("aws.claude-opus-4-6", "overseas", top_level_system=True, need_max_tokens=True, vendor="Claude"),
-    ModelConfig("vertex_ai.claude-opus-4-5-20251101", "overseas", top_level_system=True, need_max_tokens=True, vendor="Claude"),
+    ModelConfig("aws.claude-sonnet-4-6", "overseas", stream=False, top_level_system=True, need_max_tokens=True, vendor="Claude"),
+    ModelConfig("aws.claude-opus-4-6", "overseas", stream=False, top_level_system=True, need_max_tokens=True, vendor="Claude"),
+    ModelConfig("vertex_ai.claude-opus-4-5-20251101", "overseas", stream=False, top_level_system=True, need_max_tokens=True, vendor="Claude"),
     ModelConfig("vertex_ai.gemini-3.1-pro-preview", "overseas", input_field="contents", vendor="Gemini"),
     ModelConfig("grok-4-1-fast-reasoning", "overseas", vendor="Grok"),
     ModelConfig("z_ai.glm-5", "overseas", thinking={"type": "disabled"}, vendor="GLM"),
@@ -84,6 +85,7 @@ def _clone_with_variant(
         model_name=cfg.model_name,
         endpoint=cfg.endpoint,
         input_field=cfg.input_field,
+        stream=cfg.stream,
         top_level_system=cfg.top_level_system,
         need_max_tokens=cfg.need_max_tokens,
         enable_thinking=enable_thinking,
@@ -102,7 +104,7 @@ def expand_model_configs(model_name: str, lookup: dict[str, ModelConfig]) -> lis
 
 
 def build_payload(cfg: ModelConfig, prompt_bundle: dict[str, Any]) -> dict[str, Any]:
-    payload: dict[str, Any] = {"model": cfg.model_name, "stream": True}
+    payload: dict[str, Any] = {"model": cfg.model_name, "stream": cfg.stream}
     system_prompt = str(prompt_bundle.get("system_prompt") or "")
     user_prompt = str(prompt_bundle.get("user_prompt") or "")
     combined_prompt = str(prompt_bundle.get("combined_prompt") or user_prompt)
@@ -138,6 +140,15 @@ def get_url(cfg: ModelConfig) -> str:
 
 
 def extract_content(data: dict[str, Any]) -> str:
+    def join_text_items(items: list[Any]) -> str:
+        parts: list[str] = []
+        for item in items:
+            if isinstance(item, dict):
+                text = item.get("text")
+                if text is not None:
+                    parts.append(str(text))
+        return "".join(parts)
+
     if "choices" in data and len(data["choices"]) > 0:
         choice = data["choices"][0]
         if "message" in choice:
@@ -147,21 +158,23 @@ def extract_content(data: dict[str, Any]) -> str:
         message = data["message"]
         content = message.get("content")
         if isinstance(content, list):
-            parts = [part.get("text", "") for part in content if isinstance(part, dict) and part.get("type") == "text"]
-            if parts:
-                return "".join(parts)
+            joined = join_text_items(content)
+            if joined:
+                return joined
         if isinstance(content, str):
             return content
 
     if "content" in data and isinstance(data["content"], list):
-        parts = [part.get("text", "") for part in data["content"] if part.get("type") == "text"]
-        return "".join(parts)
+        joined = join_text_items(data["content"])
+        if joined:
+            return joined
 
     if "candidates" in data and len(data["candidates"]) > 0:
         candidate = data["candidates"][0]
         if "content" in candidate and "parts" in candidate["content"]:
-            parts = [part.get("text", "") for part in candidate["content"]["parts"]]
-            return "".join(parts)
+            joined = join_text_items(candidate["content"]["parts"])
+            if joined:
+                return joined
 
     if "output" in data:
         output = data["output"]
@@ -337,7 +350,7 @@ def test_model(api_key: str, cfg: ModelConfig, prompt_bundle: dict[str, Any], ti
 
     start = time.time()
     try:
-        with requests.post(url, headers=headers, json=payload, timeout=timeout, stream=True) as response:
+        with requests.post(url, headers=headers, json=payload, timeout=timeout, stream=cfg.stream) as response:
             elapsed = time.time() - start
 
             result = {
@@ -348,7 +361,7 @@ def test_model(api_key: str, cfg: ModelConfig, prompt_bundle: dict[str, Any], ti
                 "endpoint": cfg.endpoint,
                 "url": url,
                 "request_flags": {
-                    "stream": True,
+                    "stream": cfg.stream,
                     "enable_thinking": cfg.enable_thinking,
                     "thinking": cfg.thinking,
                 },
@@ -361,7 +374,7 @@ def test_model(api_key: str, cfg: ModelConfig, prompt_bundle: dict[str, Any], ti
 
             if response.status_code == 200:
                 content_type = (response.headers.get("Content-Type") or "").lower()
-                if "text/event-stream" in content_type:
+                if cfg.stream and "text/event-stream" in content_type:
                     content, raw_keys = extract_streaming_response(response)
                     result["success"] = True
                     result["response"] = content
@@ -384,7 +397,7 @@ def test_model(api_key: str, cfg: ModelConfig, prompt_bundle: dict[str, Any], ti
             "endpoint": cfg.endpoint,
             "url": url,
             "request_flags": {
-                "stream": True,
+                "stream": cfg.stream,
                 "enable_thinking": cfg.enable_thinking,
                 "thinking": cfg.thinking,
             },
@@ -403,7 +416,7 @@ def test_model(api_key: str, cfg: ModelConfig, prompt_bundle: dict[str, Any], ti
             "endpoint": cfg.endpoint,
             "url": url,
             "request_flags": {
-                "stream": True,
+                "stream": cfg.stream,
                 "enable_thinking": cfg.enable_thinking,
                 "thinking": cfg.thinking,
             },
