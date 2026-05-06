@@ -25,7 +25,6 @@ OVERSEAS_MODELS=(
 )
 
 EVAL_DOMESTIC_MODELS=(
-  "glm-4.7-inner"
   "z_ai.glm-5"
   "moonshot.kimi-k2.5"
 )
@@ -33,11 +32,11 @@ EVAL_DOMESTIC_MODELS=(
 DOMESTIC_MODELS=(
   "qwen3.6-max-preview"
   "qwen3.6-plus"
-  "deepseek-v4-pro"
-  "deepseek-v4-flash"
-  "kimi-k2.6"
-  "glm-5.1"
-  "minimax-m2.7"
+  "deepseek.deepseek-v4-pro"
+  "deepseek.deepseek-v4-flash"
+  "moonshot.kimi-k2.6"
+  "minimax.MiniMax-M2.7"
+  "xiaomi.mimo-v2.5"
 )
 
 ALL_MODELS=("${OVERSEAS_MODELS[@]}" "${EVAL_DOMESTIC_MODELS[@]}" "${DOMESTIC_MODELS[@]}")

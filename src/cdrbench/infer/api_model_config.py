@@ -84,19 +84,28 @@ API_MODEL_CONFIGS: tuple[ApiModelConfig, ...] = (
     ),
     ApiModelConfig('qwen3.6-max-preview', 'domestic'),
     ApiModelConfig('qwen3.6-plus', 'domestic'),
-    ApiModelConfig('deepseek-v4-pro', 'domestic'),
     ApiModelConfig(
-        'deepseek-v4-flash',
+        'deepseek.deepseek-v4-pro',
         'domestic',
-        aliases=('deepseek_v4_flash',),
+        aliases=('deepseek-v4-pro',),
     ),
-    ApiModelConfig('kimi-k2.6', 'domestic'),
+    ApiModelConfig(
+        'deepseek.deepseek-v4-flash',
+        'domestic',
+        aliases=('deepseek-v4-flash', 'deepseek_v4_flash'),
+    ),
+    ApiModelConfig(
+        'moonshot.kimi-k2.6',
+        'domestic',
+        aliases=('kimi-k2.6',),
+    ),
     ApiModelConfig('glm-5.1', 'domestic'),
     ApiModelConfig(
-        'minimax-m2.7',
+        'minimax.MiniMax-M2.7',
         'domestic',
         aliases=('minimax-m2.5', 'minimax-m2.7', 'MiniMax-M2.5', 'MiniMax-M2.7'),
     ),
+    ApiModelConfig('xiaomi.mimo-v2.5', 'domestic'),
 )
 
 

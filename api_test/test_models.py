@@ -42,6 +42,7 @@ class ModelConfig:
     top_p: float | None = None
     enable_thinking: bool | None = None
     thinking: dict[str, Any] | None = None
+    variant_label: str = ""
     vendor: str = ""
     note: str = ""
 
@@ -56,21 +57,68 @@ ALL_MODELS: list[ModelConfig] = [
     ModelConfig("vertex_ai.gemini-3-pro-preview", "overseas", input_field="contents", vendor="Gemini"),
     ModelConfig("ai_studio.gemini-3-pro-image-preview", "overseas", input_field="contents", vendor="Gemini"),
     ModelConfig("grok-4-1-fast-non-reasoning", "overseas", vendor="Grok"),
-    ModelConfig("glm-4.7-inner", "overseas", vendor="GLM", note="文档列在eval平台"),
-    ModelConfig("z_ai.glm-5", "overseas", thinking={"type": "disabled"}, vendor="GLM"),
-    ModelConfig("moonshot.kimi-k2.5", "overseas", temperature=1.0, top_p=0.95, vendor="Kimi"),
+    ModelConfig("z_ai.glm-5", "overseas", vendor="GLM"),
+    ModelConfig("moonshot.kimi-k2.5", "overseas", enable_thinking=False, vendor="Kimi"),
     ModelConfig("qwen3.6-max-preview", "domestic", enable_thinking=False, vendor="Qwen"),
     ModelConfig("qwen3.6-plus", "domestic", enable_thinking=False, vendor="Qwen"),
-    ModelConfig("deepseek-v4-pro", "domestic", vendor="DeepSeek"),
-    ModelConfig("deepseek-v4-flash", "domestic", vendor="DeepSeek"),
-    ModelConfig("kimi-k2.6", "domestic", temperature=1.0, top_p=0.95, vendor="Kimi"),
-    ModelConfig("glm-5.1", "domestic", thinking={"type": "disabled"}, vendor="GLM"),
-    ModelConfig("minimax-m2.7", "domestic", vendor="MiniMax"),
+    ModelConfig("deepseek.deepseek-v4-pro", "domestic", vendor="DeepSeek"),
+    ModelConfig("deepseek.deepseek-v4-flash", "domestic", vendor="DeepSeek"),
+    ModelConfig("moonshot.kimi-k2.6", "domestic", enable_thinking=False, vendor="Kimi"),
+    ModelConfig("minimax.MiniMax-M2.7", "domestic", vendor="MiniMax"),
+    ModelConfig("xiaomi.mimo-v2.5", "domestic", vendor="Xiaomi"),
 ]
 
 
 def build_model_lookup() -> dict[str, ModelConfig]:
     return {item.model_name: item for item in ALL_MODELS}
+
+
+def config_test_name(cfg: ModelConfig) -> str:
+    if cfg.variant_label:
+        return f"{cfg.model_name} [{cfg.variant_label}]"
+    return cfg.model_name
+
+
+def _clone_with_variant(
+    cfg: ModelConfig,
+    *,
+    variant_label: str,
+    enable_thinking: bool | None = None,
+    thinking: dict[str, Any] | None = None,
+) -> ModelConfig:
+    return ModelConfig(
+        model_name=cfg.model_name,
+        endpoint=cfg.endpoint,
+        input_field=cfg.input_field,
+        need_max_tokens=cfg.need_max_tokens,
+        temperature=cfg.temperature,
+        top_p=cfg.top_p,
+        enable_thinking=enable_thinking,
+        thinking=thinking,
+        variant_label=variant_label,
+        vendor=cfg.vendor,
+        note=cfg.note,
+    )
+
+
+def expand_model_configs(model_name: str, lookup: dict[str, ModelConfig]) -> list[ModelConfig]:
+    cfg = lookup.get(model_name)
+    if cfg is None:
+        return [ModelConfig(model_name, "overseas", vendor="Unknown", note="不在预定义列表中")]
+
+    normalized = model_name.strip().lower()
+    if normalized in {
+        "z_ai.glm-5",
+        "deepseek.deepseek-v4-pro",
+        "deepseek.deepseek-v4-flash",
+        "minimax.minimax-m2.7",
+        "xiaomi.mimo-v2.5",
+    }:
+        return [
+            _clone_with_variant(cfg, variant_label="enable_thinking=false", enable_thinking=False),
+            _clone_with_variant(cfg, variant_label='thinking={"type":"disabled"}', thinking={"type": "disabled"}),
+        ]
+    return [cfg]
 
 
 def build_payload(cfg: ModelConfig, prompt_bundle: dict[str, Any]) -> dict[str, Any]:
@@ -294,6 +342,8 @@ def test_model(api_key: str, cfg: ModelConfig, prompt_bundle: dict[str, Any], ti
 
             result = {
                 "model": cfg.model_name,
+                "test_name": config_test_name(cfg),
+                "variant_label": cfg.variant_label or None,
                 "vendor": cfg.vendor,
                 "endpoint": cfg.endpoint,
                 "url": url,
@@ -328,6 +378,8 @@ def test_model(api_key: str, cfg: ModelConfig, prompt_bundle: dict[str, Any], ti
     except requests.exceptions.Timeout:
         return {
             "model": cfg.model_name,
+            "test_name": config_test_name(cfg),
+            "variant_label": cfg.variant_label or None,
             "vendor": cfg.vendor,
             "endpoint": cfg.endpoint,
             "url": url,
@@ -345,6 +397,8 @@ def test_model(api_key: str, cfg: ModelConfig, prompt_bundle: dict[str, Any], ti
     except Exception as exc:
         return {
             "model": cfg.model_name,
+            "test_name": config_test_name(cfg),
+            "variant_label": cfg.variant_label or None,
             "vendor": cfg.vendor,
             "endpoint": cfg.endpoint,
             "url": url,
@@ -373,17 +427,19 @@ def main() -> int:
     args = parser.parse_args()
 
     lookup = build_model_lookup()
-    results: list[dict[str, Any]] = []
-    total = len(args.models)
+    expanded_configs: list[ModelConfig] = []
+    for model_name in args.models:
+        expanded_configs.extend(expand_model_configs(model_name, lookup))
 
-    for index, model_name in enumerate(args.models, start=1):
-        cfg = lookup.get(model_name)
-        if cfg is None:
-            cfg = ModelConfig(model_name, "overseas", vendor="Unknown", note="不在预定义列表中")
+    results: list[dict[str, Any]] = []
+    total = len(expanded_configs)
+    prompt_source = ""
+
+    for index, cfg in enumerate(expanded_configs, start=1):
         prompt_bundle, prompt_source = resolve_prompt(args.eval_path, args.prompt_config, args.prompt_variant_index, cfg.model_name)
 
         endpoint_label = "海外" if cfg.endpoint == "overseas" else "国内"
-        print(f"[{index}/{total}] 测试 {model_name} ({endpoint_label}/{cfg.vendor}) ...", end=" ", flush=True)
+        print(f"[{index}/{total}] 测试 {config_test_name(cfg)} ({endpoint_label}/{cfg.vendor}) ...", end=" ", flush=True)
 
         result = test_model(args.api_key, cfg, prompt_bundle, args.timeout)
         results.append(result)
@@ -411,8 +467,8 @@ def main() -> int:
         print()
 
     success_count = sum(1 for item in results if item["success"])
-    success_models = [item["model"] for item in results if item["success"]]
-    failed_models = [item["model"] for item in results if not item["success"]]
+    success_models = [item["test_name"] for item in results if item["success"]]
+    failed_models = [item["test_name"] for item in results if not item["success"]]
 
     print("=" * 60)
     print(f"汇总: {success_count}/{total} 个模型可用")
@@ -421,7 +477,7 @@ def main() -> int:
         mark = "✅" if item["success"] else "❌"
         endpoint = item.get("endpoint", "?")
         vendor = item.get("vendor", "?")
-        print(f"  {mark} [{endpoint:8s}/{vendor:8s}] {item['model']}")
+        print(f"  {mark} [{endpoint:8s}/{vendor:8s}] {item['test_name']}")
         if item.get("note"):
             print(f"      备注: {item['note']}")
 

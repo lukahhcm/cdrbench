@@ -252,8 +252,15 @@ def _is_glm5_family(model_name: str) -> bool:
     return 'glm5' in normalized
 
 
+def _is_kimi_family(model_name: str) -> bool:
+    normalized = re.sub(r'[^a-z0-9]+', '', model_name.strip().lower())
+    return 'kimik25' in normalized or 'kimik26' in normalized
+
+
 def _api_extra_body_for_model(model_name: str) -> dict[str, Any]:
     if _is_qwen_family(model_name):
+        return {'enable_thinking': False}
+    if _is_kimi_family(model_name):
         return {'enable_thinking': False}
     if _is_glm5_family(model_name):
         return {'thinking': {'type': 'disabled'}}
