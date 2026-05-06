@@ -242,14 +242,21 @@ def _render_user_prompt(row: dict[str, Any], user_requirement: str, output_hint:
     )
 
 
-def _is_qwen35_family(model_name: str) -> bool:
+def _is_qwen_family(model_name: str) -> bool:
     normalized = re.sub(r'[^a-z0-9]+', '', model_name.strip().lower())
-    return 'qwen35' in normalized
+    return 'qwen' in normalized
+
+
+def _is_glm5_family(model_name: str) -> bool:
+    normalized = re.sub(r'[^a-z0-9]+', '', model_name.strip().lower())
+    return 'glm5' in normalized
 
 
 def _api_extra_body_for_model(model_name: str) -> dict[str, Any]:
-    if _is_qwen35_family(model_name):
-        return {'chat_template_kwargs': {'enable_thinking': False}}
+    if _is_qwen_family(model_name):
+        return {'enable_thinking': False}
+    if _is_glm5_family(model_name):
+        return {'thinking': {'type': 'disabled'}}
     return {}
 
 

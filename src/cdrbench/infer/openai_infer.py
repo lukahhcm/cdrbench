@@ -62,11 +62,12 @@ class OpenAIInfer(BaseInfer):
 
         for attempt in range(max(1, self.max_retries)):
             try:
+                collected_parts: list[str] = []
                 request_kwargs: Dict[str, Any] = {
                     'model': self.model,
                     'messages': messages,
                     'temperature': self.temperature,
-                    'stream': False,
+                    'stream': True,
                 }
                 if self.top_p > 0:
                     request_kwargs['top_p'] = self.top_p
@@ -74,8 +75,16 @@ class OpenAIInfer(BaseInfer):
                     request_kwargs['max_tokens'] = self.max_tokens
                 if self._extra_body:
                     request_kwargs['extra_body'] = self._extra_body
-                resp = self._client.chat.completions.create(**request_kwargs)
-                return resp.choices[0].message.content or ''
+                stream = self._client.chat.completions.create(**request_kwargs)
+                for chunk in stream:
+                    choices = getattr(chunk, 'choices', None) or []
+                    if not choices:
+                        continue
+                    delta = getattr(choices[0], 'delta', None)
+                    content = getattr(delta, 'content', None) if delta is not None else None
+                    if content:
+                        collected_parts.append(str(content))
+                return ''.join(collected_parts)
             except Exception as exc:
                 last_exc = exc
                 if attempt < self.max_retries - 1:
@@ -184,7 +193,7 @@ class CompatApiInfer(BaseInfer):
 
     def _build_payload(self, messages: List[dict[str, Any]]) -> dict[str, Any]:
         input_field = self._model_config.input_field if self._model_config is not None else 'messages'
-        payload: dict[str, Any] = {'model': self.model}
+        payload: dict[str, Any] = {'model': self.model, 'stream': True}
 
         if input_field == 'input':
             payload['input'] = self._build_input_messages(messages)
@@ -246,6 +255,43 @@ class CompatApiInfer(BaseInfer):
 
         return json.dumps(response_json, ensure_ascii=False)
 
+    @classmethod
+    def _extract_stream_chunk_text(cls, response_json: dict[str, Any]) -> str:
+        choices = response_json.get('choices')
+        if isinstance(choices, list) and choices:
+            choice = choices[0]
+            if isinstance(choice, dict):
+                delta = choice.get('delta')
+                if isinstance(delta, dict):
+                    content = delta.get('content')
+                    if content is not None:
+                        return cls._stringify_content(content)
+                message = choice.get('message')
+                if isinstance(message, dict):
+                    content = message.get('content')
+                    if content is not None:
+                        return cls._stringify_content(content)
+
+        return cls._extract_text(response_json)
+
+    @classmethod
+    def _extract_streaming_response_text(cls, response: requests.Response) -> str:
+        parts: list[str] = []
+        for raw_line in response.iter_lines(decode_unicode=True):
+            if not raw_line:
+                continue
+            line = raw_line.strip()
+            if not line.startswith('data:'):
+                continue
+            data = line[5:].strip()
+            if not data or data == '[DONE]':
+                continue
+            payload = json.loads(data)
+            chunk_text = cls._extract_stream_chunk_text(payload)
+            if chunk_text:
+                parts.append(chunk_text)
+        return ''.join(parts)
+
     def _call_once(self, messages: List[dict]) -> str:
         last_exc: Exception = RuntimeError('no attempts made')
         delay = self.retry_delay
@@ -257,17 +303,21 @@ class CompatApiInfer(BaseInfer):
 
         for attempt in range(max(1, self.max_retries)):
             try:
-                response = requests.post(
+                with requests.post(
                     self._request_url,
                     headers=headers,
                     json=payload,
                     timeout=self.timeout,
-                )
-                if response.status_code != 200:
-                    raise RuntimeError(
-                        f'HTTP {response.status_code} url={self._request_url} body={response.text}'
-                    )
-                return self._extract_text(response.json())
+                    stream=True,
+                ) as response:
+                    if response.status_code != 200:
+                        raise RuntimeError(
+                            f'HTTP {response.status_code} url={self._request_url} body={response.text}'
+                        )
+                    content_type = (response.headers.get('Content-Type') or '').lower()
+                    if 'text/event-stream' in content_type:
+                        return self._extract_streaming_response_text(response)
+                    return self._extract_text(response.json())
             except Exception as exc:
                 last_exc = exc
                 if attempt < self.max_retries - 1:

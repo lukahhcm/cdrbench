@@ -14,12 +14,18 @@ fi
 
 OVERSEAS_MODELS=(
   "openai.gpt-5.4-2026-03-05"
-  "vertex_ai.claude-sonnet-4-6"
-  "vertex_ai.claude-opus-4-5-20251101"
-  "grok-4-1-fast-reasoning"
+  "openai.gpt-5.4-pro-2026-03-05"
+  "aws.claude-sonnet-4-6"
+  "aws.claude-opus-4-6"
+  "aws.claude-opus-4-5-20251101"
+  "ai_studio.gemini-3.1-pro-preview"
+  "vertex_ai.gemini-3-pro-preview"
+  "ai_studio.gemini-3-pro-image-preview"
+  "grok-4-1-fast-non-reasoning"
 )
 
 EVAL_DOMESTIC_MODELS=(
+  "glm-4.7-inner"
   "z_ai.glm-5"
   "moonshot.kimi-k2.5"
 )
@@ -31,6 +37,7 @@ DOMESTIC_MODELS=(
   "deepseek-v4-flash"
   "kimi-k2.6"
   "glm-5.1"
+  "minimax-m2.7"
 )
 
 ALL_MODELS=("${OVERSEAS_MODELS[@]}" "${EVAL_DOMESTIC_MODELS[@]}" "${DOMESTIC_MODELS[@]}")

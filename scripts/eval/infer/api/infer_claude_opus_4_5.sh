@@ -7,7 +7,7 @@ cd "${REPO_ROOT}"
 
 TRACKS="${TRACKS:-atomic_ops,main,order_sensitivity}"
 EVAL_ROOT="${EVAL_ROOT:-data/benchmark}"
-MODEL="${MODEL:-vertex_ai.claude-opus-4-5-20251101}"
+MODEL="${MODEL:-aws.claude-opus-4-5-20251101}"
 BASE_URL="${BASE_URL:-https://eval.dashscope.aliyuncs.com/compatible-mode/v1}"
 API_KEY="${API_KEY:-${ANTHROPIC_API_KEY:-}}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-data/evaluation/infer/claude_opus_4_5}"

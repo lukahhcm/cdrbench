@@ -41,23 +41,31 @@ class ModelConfig:
     temperature: float = 0.0
     top_p: float | None = None
     enable_thinking: bool | None = None
+    thinking: dict[str, Any] | None = None
     vendor: str = ""
     note: str = ""
 
 
 ALL_MODELS: list[ModelConfig] = [
     ModelConfig("openai.gpt-5.4-2026-03-05", "overseas", vendor="OpenAI"),
-    ModelConfig("vertex_ai.claude-sonnet-4-6", "overseas", need_max_tokens=True, vendor="Claude"),
-    ModelConfig("vertex_ai.claude-opus-4-5-20251101", "overseas", need_max_tokens=True, vendor="Claude"),
-    ModelConfig("grok-4-1-fast-reasoning", "overseas", vendor="Grok"),
-    ModelConfig("z_ai.glm-5", "overseas", vendor="GLM"),
+    ModelConfig("openai.gpt-5.4-pro-2026-03-05", "overseas", input_field="input", need_max_tokens=True, vendor="OpenAI"),
+    ModelConfig("aws.claude-sonnet-4-6", "overseas", need_max_tokens=True, vendor="Claude"),
+    ModelConfig("aws.claude-opus-4-6", "overseas", need_max_tokens=True, vendor="Claude"),
+    ModelConfig("aws.claude-opus-4-5-20251101", "overseas", need_max_tokens=True, vendor="Claude"),
+    ModelConfig("ai_studio.gemini-3.1-pro-preview", "overseas", input_field="contents", vendor="Gemini"),
+    ModelConfig("vertex_ai.gemini-3-pro-preview", "overseas", input_field="contents", vendor="Gemini"),
+    ModelConfig("ai_studio.gemini-3-pro-image-preview", "overseas", input_field="contents", vendor="Gemini"),
+    ModelConfig("grok-4-1-fast-non-reasoning", "overseas", vendor="Grok"),
+    ModelConfig("glm-4.7-inner", "overseas", vendor="GLM", note="文档列在eval平台"),
+    ModelConfig("z_ai.glm-5", "overseas", thinking={"type": "disabled"}, vendor="GLM"),
     ModelConfig("moonshot.kimi-k2.5", "overseas", temperature=1.0, top_p=0.95, vendor="Kimi"),
     ModelConfig("qwen3.6-max-preview", "domestic", enable_thinking=False, vendor="Qwen"),
     ModelConfig("qwen3.6-plus", "domestic", enable_thinking=False, vendor="Qwen"),
     ModelConfig("deepseek-v4-pro", "domestic", vendor="DeepSeek"),
     ModelConfig("deepseek-v4-flash", "domestic", vendor="DeepSeek"),
     ModelConfig("kimi-k2.6", "domestic", temperature=1.0, top_p=0.95, vendor="Kimi"),
-    ModelConfig("glm-5.1", "domestic", vendor="GLM"),
+    ModelConfig("glm-5.1", "domestic", thinking={"type": "disabled"}, vendor="GLM"),
+    ModelConfig("minimax-m2.7", "domestic", vendor="MiniMax"),
 ]
 
 
@@ -66,7 +74,7 @@ def build_model_lookup() -> dict[str, ModelConfig]:
 
 
 def build_payload(cfg: ModelConfig, prompt_bundle: dict[str, Any]) -> dict[str, Any]:
-    payload: dict[str, Any] = {"model": cfg.model_name}
+    payload: dict[str, Any] = {"model": cfg.model_name, "stream": True}
     system_prompt = str(prompt_bundle.get("system_prompt") or "")
     user_prompt = str(prompt_bundle.get("user_prompt") or "")
     combined_prompt = str(prompt_bundle.get("combined_prompt") or user_prompt)
@@ -91,6 +99,8 @@ def build_payload(cfg: ModelConfig, prompt_bundle: dict[str, Any]) -> dict[str, 
         payload["top_p"] = cfg.top_p
     if cfg.enable_thinking is not None:
         payload["enable_thinking"] = cfg.enable_thinking
+    if cfg.thinking is not None:
+        payload["thinking"] = cfg.thinking
 
     return payload
 
@@ -125,6 +135,42 @@ def extract_content(data: dict[str, Any]) -> str:
                 return message.get("content", "")
 
     return json.dumps(data, ensure_ascii=False)
+
+
+def extract_stream_chunk_content(data: dict[str, Any]) -> str:
+    if "choices" in data and len(data["choices"]) > 0:
+        choice = data["choices"][0]
+        delta = choice.get("delta")
+        if isinstance(delta, dict):
+            content = delta.get("content")
+            if content is not None:
+                if isinstance(content, list):
+                    return "".join(str(item.get("text", "")) if isinstance(item, dict) else str(item) for item in content)
+                return str(content)
+        if "message" in choice:
+            return choice["message"].get("content", "")
+    return extract_content(data)
+
+
+def extract_streaming_response(response: requests.Response) -> tuple[str, list[str]]:
+    parts: list[str] = []
+    raw_keys: list[str] = []
+    for raw_line in response.iter_lines(decode_unicode=True):
+        if not raw_line:
+            continue
+        line = raw_line.strip()
+        if not line.startswith("data:"):
+            continue
+        data_str = line[5:].strip()
+        if not data_str or data_str == "[DONE]":
+            continue
+        payload = json.loads(data_str)
+        if not raw_keys:
+            raw_keys = list(payload.keys())
+        chunk = extract_stream_chunk_content(payload)
+        if chunk:
+            parts.append(chunk)
+    return "".join(parts), raw_keys
 
 
 def load_prompt_config(path: Path) -> dict[str, Any]:
@@ -243,33 +289,42 @@ def test_model(api_key: str, cfg: ModelConfig, prompt_bundle: dict[str, Any], ti
 
     start = time.time()
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=timeout)
-        elapsed = time.time() - start
+        with requests.post(url, headers=headers, json=payload, timeout=timeout, stream=True) as response:
+            elapsed = time.time() - start
 
-        result = {
-            "model": cfg.model_name,
-            "vendor": cfg.vendor,
-            "endpoint": cfg.endpoint,
-            "url": url,
-            "request_flags": {
-                "enable_thinking": cfg.enable_thinking,
-            },
-            "status_code": response.status_code,
-            "elapsed": round(elapsed, 2),
-            "success": False,
-            "response": None,
-            "error": None,
-        }
+            result = {
+                "model": cfg.model_name,
+                "vendor": cfg.vendor,
+                "endpoint": cfg.endpoint,
+                "url": url,
+                "request_flags": {
+                    "stream": True,
+                    "enable_thinking": cfg.enable_thinking,
+                    "thinking": cfg.thinking,
+                },
+                "status_code": response.status_code,
+                "elapsed": round(elapsed, 2),
+                "success": False,
+                "response": None,
+                "error": None,
+            }
 
-        if response.status_code == 200:
-            data = response.json()
-            result["success"] = True
-            result["response"] = extract_content(data)
-            result["raw_keys"] = list(data.keys())
-        else:
-            result["error"] = response.text
+            if response.status_code == 200:
+                content_type = (response.headers.get("Content-Type") or "").lower()
+                if "text/event-stream" in content_type:
+                    content, raw_keys = extract_streaming_response(response)
+                    result["success"] = True
+                    result["response"] = content
+                    result["raw_keys"] = raw_keys
+                else:
+                    data = response.json()
+                    result["success"] = True
+                    result["response"] = extract_content(data)
+                    result["raw_keys"] = list(data.keys())
+            else:
+                result["error"] = response.text
 
-        return result
+            return result
     except requests.exceptions.Timeout:
         return {
             "model": cfg.model_name,
@@ -277,7 +332,9 @@ def test_model(api_key: str, cfg: ModelConfig, prompt_bundle: dict[str, Any], ti
             "endpoint": cfg.endpoint,
             "url": url,
             "request_flags": {
+                "stream": True,
                 "enable_thinking": cfg.enable_thinking,
+                "thinking": cfg.thinking,
             },
             "status_code": None,
             "elapsed": timeout,
@@ -292,7 +349,9 @@ def test_model(api_key: str, cfg: ModelConfig, prompt_bundle: dict[str, Any], ti
             "endpoint": cfg.endpoint,
             "url": url,
             "request_flags": {
+                "stream": True,
                 "enable_thinking": cfg.enable_thinking,
+                "thinking": cfg.thinking,
             },
             "status_code": None,
             "elapsed": round(time.time() - start, 2),
@@ -331,16 +390,22 @@ def main() -> int:
 
         if result["success"]:
             print(f"✅ 成功 ({result['elapsed']}s)")
+            print("    请求参数: stream=true")
             if cfg.enable_thinking is not None:
                 print(f"    请求参数: enable_thinking={str(cfg.enable_thinking).lower()}")
+            if cfg.thinking is not None:
+                print(f"    请求参数: thinking={json.dumps(cfg.thinking, ensure_ascii=False)}")
             preview = (result["response"] or "")[:120]
             print(f"    回复: {preview}")
             if result.get("raw_keys"):
                 print(f"    返回字段: {result['raw_keys']}")
         else:
             print("❌ 失败")
+            print("    请求参数: stream=true")
             if cfg.enable_thinking is not None:
                 print(f"    请求参数: enable_thinking={str(cfg.enable_thinking).lower()}")
+            if cfg.thinking is not None:
+                print(f"    请求参数: thinking={json.dumps(cfg.thinking, ensure_ascii=False)}")
             error_preview = (result["error"] or "")[:200]
             print(f"    错误: {error_preview}")
         print()
