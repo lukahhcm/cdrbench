@@ -1,288 +1,263 @@
 #!/usr/bin/env python3
+"""模型可用性测试脚本
+请求方式与 api_test/ref/test_models.py 保持一致：
+  - 海外模型 → https://eval.dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
+  - 国内模型 → https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
+
+只保留在参考结果中已经验证成功、并且用于 benchmark infer 的模型。
+测试 prompt 来自 benchmark main track 的第一条数据。
+"""
+
 from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import requests
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SRC_ROOT = REPO_ROOT / 'src'
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
+DEFAULT_EVAL_PATH = REPO_ROOT / "data" / "benchmark" / "main" / "main.jsonl"
 
-from cdrbench.eval.run_benchmark_infer import (  # noqa: E402
-    DEFAULT_PROMPT_CONFIG,
-    _build_infer_backend,
-    _default_system_prompt,
-    _extract_prediction_fields,
-    _extract_prediction_payload,
-    _final_user_prompt,
-    _is_retryable_prediction_error,
-    _load_yaml,
-    _retry_request_error,
-    _select_prompt_variant,
-    _tagged_output_hint,
-)
+OVERSEAS_URL = "https://eval.dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+DOMESTIC_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+
+DEFAULT_MAX_TOKENS = 1024
 
 
-DEFAULT_EVAL_PATH = REPO_ROOT / 'data' / 'benchmark' / 'main' / 'main.jsonl'
-DEFAULT_TIMEOUT_SECONDS = 300.0
-DEFAULT_MAX_RETRIES = 4
-
-MODEL_PATTERN = re.compile(r'^MODEL="\$\{MODEL:-(.+)\}"$')
-BASE_URL_PATTERN = re.compile(r'^BASE_URL="\$\{BASE_URL:-(.+)\}"$')
-
-
-@dataclass(frozen=True)
-class ScriptModelConfig:
-    script_path: Path
-    script_name: str
-    model: str
-    base_url: str
+@dataclass
+class ModelConfig:
+    model_name: str
+    endpoint: str
+    input_field: str = "messages"
+    need_max_tokens: bool = False
+    vendor: str = ""
+    note: str = ""
 
 
-def _read_jsonl_first_row(path: Path) -> dict[str, Any]:
-    with path.open('r', encoding='utf-8') as handle:
+ALL_MODELS: list[ModelConfig] = [
+    ModelConfig("openai.gpt-5.4-2026-03-05", "overseas", vendor="OpenAI"),
+    ModelConfig("vertex_ai.claude-sonnet-4-6", "overseas", need_max_tokens=True, vendor="Claude"),
+    ModelConfig("vertex_ai.claude-opus-4-5-20251101", "overseas", need_max_tokens=True, vendor="Claude"),
+    ModelConfig("grok-4-1-fast-reasoning", "overseas", vendor="Grok"),
+    ModelConfig("z_ai.glm-5", "overseas", vendor="GLM"),
+    ModelConfig("moonshot.kimi-k2.5", "overseas", vendor="Kimi"),
+    ModelConfig("qwen3.6-max-preview", "domestic", vendor="Qwen"),
+    ModelConfig("qwen3.6-plus", "domestic", vendor="Qwen"),
+    ModelConfig("deepseek-v4-pro", "domestic", vendor="DeepSeek"),
+    ModelConfig("deepseek-v4-flash", "domestic", vendor="DeepSeek"),
+    ModelConfig("kimi-k2.6", "domestic", vendor="Kimi"),
+    ModelConfig("glm-5.1", "domestic", vendor="GLM"),
+]
+
+
+def build_model_lookup() -> dict[str, ModelConfig]:
+    return {item.model_name: item for item in ALL_MODELS}
+
+
+def build_payload(cfg: ModelConfig, prompt: str) -> dict[str, Any]:
+    payload: dict[str, Any] = {"model": cfg.model_name}
+
+    if cfg.input_field == "messages":
+        payload["messages"] = [{"role": "user", "content": prompt}]
+    elif cfg.input_field == "input":
+        payload["input"] = [{"role": "user", "content": prompt}]
+    elif cfg.input_field == "contents":
+        payload["contents"] = [{"role": "user", "parts": [{"text": prompt}]}]
+
+    if cfg.need_max_tokens:
+        payload["max_tokens"] = DEFAULT_MAX_TOKENS
+
+    return payload
+
+
+def get_url(cfg: ModelConfig) -> str:
+    return OVERSEAS_URL if cfg.endpoint == "overseas" else DOMESTIC_URL
+
+
+def extract_content(data: dict[str, Any]) -> str:
+    if "choices" in data and len(data["choices"]) > 0:
+        choice = data["choices"][0]
+        if "message" in choice:
+            return choice["message"].get("content", "")
+
+    if "content" in data and isinstance(data["content"], list):
+        parts = [part.get("text", "") for part in data["content"] if part.get("type") == "text"]
+        return "".join(parts)
+
+    if "candidates" in data and len(data["candidates"]) > 0:
+        candidate = data["candidates"][0]
+        if "content" in candidate and "parts" in candidate["content"]:
+            parts = [part.get("text", "") for part in candidate["content"]["parts"]]
+            return "".join(parts)
+
+    if "output" in data:
+        output = data["output"]
+        if isinstance(output, dict):
+            if "text" in output:
+                return output["text"]
+            if "choices" in output and len(output["choices"]) > 0:
+                message = output["choices"][0].get("message", {})
+                return message.get("content", "")
+
+    return json.dumps(data, ensure_ascii=False)
+
+
+def read_prompt_from_eval(eval_path: Path) -> str:
+    with eval_path.open("r", encoding="utf-8") as handle:
         for line in handle:
-            if line.strip():
-                return json.loads(line)
-    raise RuntimeError(f'No non-empty row found in {path}.')
+            if not line.strip():
+                continue
+            row = json.loads(line)
+            for key in ("input_text", "text", "user_requirement", "reference_text"):
+                value = row.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value
+            return json.dumps(row, ensure_ascii=False)
+    raise RuntimeError(f"评测文件为空: {eval_path}")
 
 
-def _parse_default_value(path: Path, pattern: re.Pattern[str]) -> str:
-    for line in path.read_text(encoding='utf-8').splitlines():
-        match = pattern.match(line.strip())
-        if match:
-            return match.group(1)
-    raise RuntimeError(f'Failed to parse default value from {path}.')
-
-
-def load_script_model_configs(scripts_dir: Path) -> list[ScriptModelConfig]:
-    configs: list[ScriptModelConfig] = []
-    for script_path in sorted(scripts_dir.glob('infer_*.sh')):
-        configs.append(
-            ScriptModelConfig(
-                script_path=script_path,
-                script_name=script_path.name,
-                model=_parse_default_value(script_path, MODEL_PATTERN),
-                base_url=_parse_default_value(script_path, BASE_URL_PATTERN),
-            )
+def resolve_prompt(eval_path_arg: str | None) -> tuple[str, str]:
+    eval_path = Path(eval_path_arg or DEFAULT_EVAL_PATH).resolve()
+    if not eval_path.is_file():
+        raise FileNotFoundError(
+            f"benchmark main track 文件不存在: {eval_path}\n"
+            "请通过 --eval-path 指定 main.jsonl。"
         )
-    if not configs:
-        raise RuntimeError(f'No infer_*.sh scripts found under {scripts_dir}.')
-    return configs
+    return read_prompt_from_eval(eval_path), str(eval_path)
 
 
-def build_messages(eval_row: dict[str, Any], prompt_config_path: Path, prompt_variant_index: int, model: str) -> list[dict[str, str]]:
-    prompt_cfg = _load_yaml(prompt_config_path)
-    system_prompt = _default_system_prompt(prompt_cfg)
-    output_hint = _tagged_output_hint(prompt_cfg)
-    prompt_variant = _select_prompt_variant(eval_row, prompt_variant_index)
-    user_requirement = str(prompt_variant.get('user_requirement') or '').strip()
-    return [
-        {'role': 'system', 'content': system_prompt},
-        {'role': 'user', 'content': _final_user_prompt(eval_row, user_requirement, output_hint, model)},
-    ]
-
-
-def run_single_test(
-    *,
-    config: ScriptModelConfig,
-    messages: list[dict[str, str]],
-    api_key: str,
-    temperature: float,
-    top_p: float,
-    max_tokens: int,
-    timeout_seconds: float,
-    max_retries: int,
-) -> dict[str, Any]:
-    args = argparse.Namespace(
-        concurrency=1,
-        max_tokens=max_tokens,
-        temperature=temperature,
-        top_p=top_p,
-        retry_sleep_seconds=2.0,
-    )
-    backend = _build_infer_backend(args, config.model, config.base_url, api_key)
-    if hasattr(backend, 'timeout'):
-        backend.timeout = timeout_seconds
-
-    started = time.time()
-    initial_result = backend.infer_one(messages)
-    result, request_attempts = _retry_request_error(
-        infer_backend=backend,
-        initial_result=initial_result,
-        messages=messages,
-        track_name='api_test_main_first_row',
-        instance_id='main_first_row',
-        prompt_variant_index=0,
-        max_request_tries=max(1, max_retries + 1),
-    )
-
-    response_text = result.text
-    prediction_payload = None
-    prediction_error = None
-    retry_attempted = request_attempts > 1
-
-    if result.error is not None:
-        prediction_error = f'request_error: {result.error}'
-    else:
-        prediction_payload, prediction_error = _extract_prediction_payload(response_text)
-
-    if _is_retryable_prediction_error(prediction_error):
-        retry_attempted = True
-        retry_result = backend.infer_one(messages)
-        response_text = retry_result.text
-        if retry_result.error is not None:
-            prediction_payload = None
-            prediction_error = f'request_error: {retry_result.error}'
-        else:
-            prediction_payload, prediction_error = _extract_prediction_payload(response_text)
-
-    predicted_status, predicted_clean_text = _extract_prediction_fields(prediction_payload)
-    elapsed = round(time.time() - started, 2)
-    response_preview = (response_text or '').strip().replace('\n', ' ')
-    if len(response_preview) > 200:
-        response_preview = response_preview[:200] + '...'
-
-    return {
-        'script': config.script_name,
-        'model': config.model,
-        'base_url': config.base_url,
-        'success': prediction_error is None,
-        'elapsed': elapsed,
-        'request_attempts': request_attempts,
-        'retry_attempted': retry_attempted,
-        'prediction_error': prediction_error,
-        'predicted_status': predicted_status,
-        'predicted_clean_text_preview': predicted_clean_text[:200],
-        'response_preview': response_preview,
-        'raw_response': response_text,
-        'parsed_response': prediction_payload,
-        'timeout_seconds': timeout_seconds,
+def test_model(api_key: str, cfg: ModelConfig, prompt: str, timeout: int = 120) -> dict[str, Any]:
+    payload = build_payload(cfg, prompt)
+    url = get_url(cfg)
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
     }
+
+    start = time.time()
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=timeout)
+        elapsed = time.time() - start
+
+        result = {
+            "model": cfg.model_name,
+            "vendor": cfg.vendor,
+            "endpoint": cfg.endpoint,
+            "url": url,
+            "status_code": response.status_code,
+            "elapsed": round(elapsed, 2),
+            "success": False,
+            "response": None,
+            "error": None,
+        }
+
+        if response.status_code == 200:
+            data = response.json()
+            result["success"] = True
+            result["response"] = extract_content(data)
+            result["raw_keys"] = list(data.keys())
+        else:
+            result["error"] = response.text
+
+        return result
+    except requests.exceptions.Timeout:
+        return {
+            "model": cfg.model_name,
+            "vendor": cfg.vendor,
+            "endpoint": cfg.endpoint,
+            "url": url,
+            "status_code": None,
+            "elapsed": timeout,
+            "success": False,
+            "response": None,
+            "error": f"请求超时（>{timeout}s）",
+        }
+    except Exception as exc:
+        return {
+            "model": cfg.model_name,
+            "vendor": cfg.vendor,
+            "endpoint": cfg.endpoint,
+            "url": url,
+            "status_code": None,
+            "elapsed": round(time.time() - start, 2),
+            "success": False,
+            "response": None,
+            "error": str(exc),
+        }
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description='Test API models using the same logic as scripts/eval/infer/api.')
-    parser.add_argument('--api-key', required=True, help='API key passed through to the inference backend.')
-    parser.add_argument('--scripts-dir', default=str(REPO_ROOT / 'scripts' / 'eval' / 'infer' / 'api'))
-    parser.add_argument('--eval-path', default=str(DEFAULT_EVAL_PATH), help='Path to main track JSONL. The first row will be used.')
-    parser.add_argument('--prompt-config', default=str(DEFAULT_PROMPT_CONFIG))
-    parser.add_argument('--prompt-variant-index', type=int, default=0)
-    parser.add_argument('--temperature', type=float, default=0.0)
-    parser.add_argument('--top-p', type=float, default=0.0)
-    parser.add_argument('--max-tokens', type=int, default=0)
-    parser.add_argument('--timeout-seconds', type=float, default=DEFAULT_TIMEOUT_SECONDS)
-    parser.add_argument('--max-retries', type=int, default=DEFAULT_MAX_RETRIES)
-    parser.add_argument('--output', default=None, help='Optional JSON output path.')
+    parser = argparse.ArgumentParser(description="测试模型可用性")
+    parser.add_argument("--api-key", required=True, help="DashScope API Key")
+    parser.add_argument("--models", required=True, nargs="+", help="要测试的模型名称列表")
+    parser.add_argument("--eval-path", default=str(DEFAULT_EVAL_PATH), help="main track JSONL；取第一条数据作为 prompt")
+    parser.add_argument("--timeout", type=int, default=120, help="请求超时时间（秒）")
+    parser.add_argument("--output", default=None, help="将结果保存到 JSON 文件")
     args = parser.parse_args()
 
-    scripts_dir = Path(args.scripts_dir).resolve()
-    eval_path = Path(args.eval_path).resolve()
-    prompt_config_path = Path(args.prompt_config).resolve()
+    prompt, prompt_source = resolve_prompt(args.eval_path)
+    prompt_preview = prompt[:120].replace("\n", " ")
+    print(f"prompt source: {prompt_source}")
+    print(f"prompt preview: {prompt_preview}")
+    print()
 
-    if not scripts_dir.is_dir():
-        raise SystemExit(f'Scripts directory not found: {scripts_dir}')
-    if not eval_path.is_file():
-        raise SystemExit(
-            f'Main track file not found: {eval_path}\n'
-            'Pass --eval-path /path/to/main.jsonl or set EVAL_PATH when running api_test/run_test.sh.'
-        )
-    if not prompt_config_path.is_file():
-        raise SystemExit(f'Prompt config not found: {prompt_config_path}')
-
-    script_configs = load_script_model_configs(scripts_dir)
-    eval_row = _read_jsonl_first_row(eval_path)
-
+    lookup = build_model_lookup()
     results: list[dict[str, Any]] = []
-    total = len(script_configs)
-    print('=' * 72)
-    print('API inference smoke test')
-    print(f'Scripts dir : {scripts_dir}')
-    print(f'Eval row    : {eval_path} (first row only)')
-    print(f'Prompt cfg  : {prompt_config_path}')
-    print(f'Models      : {total}')
-    print('=' * 72)
+    total = len(args.models)
 
-    for index, config in enumerate(script_configs, start=1):
-        messages = build_messages(eval_row, prompt_config_path, args.prompt_variant_index, config.model)
-        print(f'[{index}/{total}] {config.script_name} -> {config.model}', end=' ', flush=True)
-        try:
-            result = run_single_test(
-                config=config,
-                messages=messages,
-                api_key=args.api_key,
-                temperature=args.temperature,
-                top_p=args.top_p,
-                max_tokens=args.max_tokens,
-                timeout_seconds=args.timeout_seconds,
-                max_retries=args.max_retries,
-            )
-        except Exception as exc:
-            result = {
-                'script': config.script_name,
-                'model': config.model,
-                'base_url': config.base_url,
-                'success': False,
-                'elapsed': 0.0,
-                'request_attempts': 0,
-                'retry_attempted': False,
-                'prediction_error': f'unhandled_error: {exc}',
-                'predicted_status': '',
-                'predicted_clean_text_preview': '',
-                'response_preview': '',
-                'raw_response': '',
-                'parsed_response': None,
-                'timeout_seconds': args.timeout_seconds,
-            }
+    for index, model_name in enumerate(args.models, start=1):
+        cfg = lookup.get(model_name)
+        if cfg is None:
+            cfg = ModelConfig(model_name, "overseas", vendor="Unknown", note="不在预定义列表中")
+
+        endpoint_label = "海外" if cfg.endpoint == "overseas" else "国内"
+        print(f"[{index}/{total}] 测试 {model_name} ({endpoint_label}/{cfg.vendor}) ...", end=" ", flush=True)
+
+        result = test_model(args.api_key, cfg, prompt, args.timeout)
         results.append(result)
 
-        if result['success']:
-            print(f'✅ success ({result["elapsed"]}s)')
+        if result["success"]:
+            print(f"✅ 成功 ({result['elapsed']}s)")
+            preview = (result["response"] or "")[:120]
+            print(f"    回复: {preview}")
+            if result.get("raw_keys"):
+                print(f"    返回字段: {result['raw_keys']}")
         else:
-            print('❌ failed')
-            print(f'    error: {result["prediction_error"]}')
-        if result['response_preview']:
-            print(f'    preview: {result["response_preview"]}')
+            print("❌ 失败")
+            error_preview = (result["error"] or "")[:200]
+            print(f"    错误: {error_preview}")
         print()
 
-    success_models = [item['model'] for item in results if item['success']]
-    failed_models = [item['model'] for item in results if not item['success']]
-
-    print('=' * 72)
-    print(f'Summary: {len(success_models)}/{total} succeeded')
-    print('Successful models:')
-    for model in success_models:
-        print(f'  - {model}')
-    print('Failed models:')
-    for model in failed_models:
-        print(f'  - {model}')
+    success_count = sum(1 for item in results if item["success"])
+    print("=" * 60)
+    print(f"汇总: {success_count}/{total} 个模型可用")
+    print("-" * 60)
+    for item in results:
+        mark = "✅" if item["success"] else "❌"
+        endpoint = item.get("endpoint", "?")
+        vendor = item.get("vendor", "?")
+        print(f"  {mark} [{endpoint:8s}/{vendor:8s}] {item['model']}")
+        if item.get("note"):
+            print(f"      备注: {item['note']}")
 
     if args.output:
         output_path = Path(args.output).resolve()
-        output_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
-            'scripts_dir': str(scripts_dir),
-            'eval_path': str(eval_path),
-            'prompt_config': str(prompt_config_path),
-            'num_models': total,
-            'num_success': len(success_models),
-            'successful_models': success_models,
-            'failed_models': failed_models,
-            'results': results,
+            "prompt_source": prompt_source,
+            "prompt_preview": prompt_preview,
+            "results": results,
         }
-        output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-        print(f'Results saved to: {output_path}')
+        output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        print(f"\n结果已保存到 {output_path}")
 
-    return 0 if not failed_models else 1
+    return 0 if success_count == total else 1
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     raise SystemExit(main())

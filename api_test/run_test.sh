@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# 模型可用性测试入口脚本
+
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -10,20 +12,35 @@ if [[ ! -x "${PYTHON_BIN}" ]]; then
   PYTHON_BIN="python3"
 fi
 
-SCRIPTS_DIR="${SCRIPTS_DIR:-${REPO_ROOT}/scripts/eval/infer/api}"
-EVAL_PATH="${EVAL_PATH:-${REPO_ROOT}/data/benchmark/main/main.jsonl}"
-PROMPT_CONFIG="${PROMPT_CONFIG:-${REPO_ROOT}/configs/recipe_prompting.yaml}"
-PROMPT_VARIANT_INDEX="${PROMPT_VARIANT_INDEX:-0}"
-TEMPERATURE="${TEMPERATURE:-0.0}"
-TOP_P="${TOP_P:-0.0}"
-MAX_TOKENS="${MAX_TOKENS:-0}"
-TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-300}"
-MAX_RETRIES="${MAX_RETRIES:-4}"
+OVERSEAS_MODELS=(
+  "openai.gpt-5.4-2026-03-05"
+  "vertex_ai.claude-sonnet-4-6"
+  "vertex_ai.claude-opus-4-5-20251101"
+  "grok-4-1-fast-reasoning"
+)
 
-read -rsp "请输入 API Key: " API_KEY
+EVAL_DOMESTIC_MODELS=(
+  "z_ai.glm-5"
+  "moonshot.kimi-k2.5"
+)
+
+DOMESTIC_MODELS=(
+  "qwen3.6-max-preview"
+  "qwen3.6-plus"
+  "deepseek-v4-pro"
+  "deepseek-v4-flash"
+  "kimi-k2.6"
+  "glm-5.1"
+)
+
+ALL_MODELS=("${OVERSEAS_MODELS[@]}" "${EVAL_DOMESTIC_MODELS[@]}" "${DOMESTIC_MODELS[@]}")
+
+EVAL_PATH="${EVAL_PATH:-${REPO_ROOT}/data/benchmark/main/main.jsonl}"
+
+read -rsp "请输入 DASHSCOPE_API_KEY: " DASHSCOPE_API_KEY
 echo
 
-if [[ -z "${API_KEY}" ]]; then
+if [[ -z "${DASHSCOPE_API_KEY}" ]]; then
   echo "错误: API Key 不能为空" >&2
   exit 1
 fi
@@ -32,25 +49,26 @@ TIMESTAMP="$(date +%Y%m%d_%H%M%S)"
 OUTPUT_FILE="${SCRIPT_DIR}/results_${TIMESTAMP}.json"
 
 echo ""
-echo "========================================================================"
-echo "  API 推理冒烟测试"
-echo "  脚本目录  : ${SCRIPTS_DIR}"
-echo "  主数据文件: ${EVAL_PATH}"
-echo "  Prompt配置: ${PROMPT_CONFIG}"
-echo "  输出文件  : ${OUTPUT_FILE}"
-echo "========================================================================"
+echo "============================================================"
+echo "  模型可用性测试"
+echo "  海外模型: ${#OVERSEAS_MODELS[@]} 个 → eval.dashscope.aliyuncs.com"
+echo "  Eval国内: ${#EVAL_DOMESTIC_MODELS[@]} 个 → eval.dashscope.aliyuncs.com"
+echo "  原生国内: ${#DOMESTIC_MODELS[@]} 个 → dashscope.aliyuncs.com"
+echo "  总计: ${#ALL_MODELS[@]} 个"
+echo "  eval-path: ${EVAL_PATH}"
+echo "  输出文件: ${OUTPUT_FILE}"
+echo "============================================================"
 echo ""
 
 "${PYTHON_BIN}" "${SCRIPT_DIR}/test_models.py" \
-  --api-key "${API_KEY}" \
-  --scripts-dir "${SCRIPTS_DIR}" \
+  --api-key "${DASHSCOPE_API_KEY}" \
+  --models "${ALL_MODELS[@]}" \
   --eval-path "${EVAL_PATH}" \
-  --prompt-config "${PROMPT_CONFIG}" \
-  --prompt-variant-index "${PROMPT_VARIANT_INDEX}" \
-  --temperature "${TEMPERATURE}" \
-  --top-p "${TOP_P}" \
-  --max-tokens "${MAX_TOKENS}" \
-  --timeout-seconds "${TIMEOUT_SECONDS}" \
-  --max-retries "${MAX_RETRIES}" \
   --output "${OUTPUT_FILE}" \
   "$@"
+
+exit_code=$?
+
+echo ""
+echo "测试完成，结果已保存到: ${OUTPUT_FILE}"
+exit $exit_code
