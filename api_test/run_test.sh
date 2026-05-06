@@ -20,11 +20,8 @@ MAX_TOKENS="${MAX_TOKENS:-0}"
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-300}"
 MAX_RETRIES="${MAX_RETRIES:-4}"
 
-API_KEY="${API_KEY:-${DASHSCOPE_API_KEY:-${OPENAI_API_KEY:-}}}"
-if [[ -z "${API_KEY}" ]]; then
-  read -rsp "请输入 API Key: " API_KEY
-  echo
-fi
+read -rsp "请输入 API Key: " API_KEY
+echo
 
 if [[ -z "${API_KEY}" ]]; then
   echo "错误: API Key 不能为空" >&2
