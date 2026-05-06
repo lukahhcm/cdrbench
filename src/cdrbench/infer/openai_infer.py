@@ -176,6 +176,19 @@ class CompatApiInfer(BaseInfer):
             )
         return payload_messages
 
+    def _split_system_messages(self, messages: List[dict[str, Any]]) -> tuple[list[str], list[dict[str, Any]]]:
+        system_parts: list[str] = []
+        remaining_messages: list[dict[str, Any]] = []
+        for message in messages:
+            role = str(message.get('role') or 'user').strip().lower()
+            if role == 'system':
+                text = self._stringify_content(message.get('content')).strip()
+                if text:
+                    system_parts.append(text)
+                continue
+            remaining_messages.append(message)
+        return system_parts, remaining_messages
+
     def _build_contents_messages(self, messages: List[dict[str, Any]]) -> list[dict[str, Any]]:
         parts: list[str] = []
         for message in messages:
@@ -195,13 +208,19 @@ class CompatApiInfer(BaseInfer):
     def _build_payload(self, messages: List[dict[str, Any]]) -> dict[str, Any]:
         input_field = self._model_config.input_field if self._model_config is not None else 'messages'
         payload: dict[str, Any] = {'model': self.model, 'stream': True}
+        effective_messages = messages
+
+        if self._model_config is not None and self._model_config.top_level_system:
+            system_parts, effective_messages = self._split_system_messages(messages)
+            if system_parts:
+                payload['system'] = '\n\n'.join(system_parts)
 
         if input_field == 'input':
-            payload['input'] = self._build_input_messages(messages)
+            payload['input'] = self._build_input_messages(effective_messages)
         elif input_field == 'contents':
-            payload['contents'] = self._build_contents_messages(messages)
+            payload['contents'] = self._build_contents_messages(effective_messages)
         else:
-            payload['messages'] = self._build_input_messages(messages)
+            payload['messages'] = self._build_input_messages(effective_messages)
 
         if self.max_tokens > 0:
             payload['max_tokens'] = self.max_tokens

@@ -37,6 +37,7 @@ class ModelConfig:
     model_name: str
     endpoint: str
     input_field: str = "messages"
+    top_level_system: bool = False
     need_max_tokens: bool = False
     enable_thinking: bool | None = None
     thinking: dict[str, Any] | None = None
@@ -48,9 +49,9 @@ class ModelConfig:
 ALL_MODELS: list[ModelConfig] = [
     ModelConfig("openai.gpt-5.4-2026-03-05", "overseas", vendor="OpenAI"),
     ModelConfig("openai.gpt-5.4-pro-2026-03-05", "overseas", input_field="input", need_max_tokens=True, vendor="OpenAI"),
-    ModelConfig("aws.claude-sonnet-4-6", "overseas", need_max_tokens=True, vendor="Claude"),
-    ModelConfig("aws.claude-opus-4-6", "overseas", need_max_tokens=True, vendor="Claude"),
-    ModelConfig("vertex_ai.claude-opus-4-5-20251101", "overseas", need_max_tokens=True, vendor="Claude"),
+    ModelConfig("aws.claude-sonnet-4-6", "overseas", top_level_system=True, need_max_tokens=True, vendor="Claude"),
+    ModelConfig("aws.claude-opus-4-6", "overseas", top_level_system=True, need_max_tokens=True, vendor="Claude"),
+    ModelConfig("vertex_ai.claude-opus-4-5-20251101", "overseas", top_level_system=True, need_max_tokens=True, vendor="Claude"),
     ModelConfig("vertex_ai.gemini-3.1-pro-preview", "overseas", input_field="contents", vendor="Gemini"),
     ModelConfig("grok-4-1-fast-reasoning", "overseas", vendor="Grok"),
     ModelConfig("z_ai.glm-5", "overseas", thinking={"type": "disabled"}, vendor="GLM"),
@@ -83,6 +84,7 @@ def _clone_with_variant(
         model_name=cfg.model_name,
         endpoint=cfg.endpoint,
         input_field=cfg.input_field,
+        top_level_system=cfg.top_level_system,
         need_max_tokens=cfg.need_max_tokens,
         enable_thinking=enable_thinking,
         thinking=thinking,
@@ -105,13 +107,16 @@ def build_payload(cfg: ModelConfig, prompt_bundle: dict[str, Any]) -> dict[str, 
     user_prompt = str(prompt_bundle.get("user_prompt") or "")
     combined_prompt = str(prompt_bundle.get("combined_prompt") or user_prompt)
 
+    if cfg.top_level_system and system_prompt:
+        payload["system"] = system_prompt
+
     if cfg.input_field == "messages":
-        payload["messages"] = [
+        payload["messages"] = [{"role": "user", "content": user_prompt}] if cfg.top_level_system else [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
     elif cfg.input_field == "input":
-        payload["input"] = [
+        payload["input"] = [{"role": "user", "content": user_prompt}] if cfg.top_level_system else [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
