@@ -85,7 +85,17 @@ prompt_for_api_key_if_needed() {
 
 run_infer() {
   if [[ -z "${MODEL}" ]]; then
-    echo "MODEL is required for infer mode." >&2
+    cat >&2 <<'EOF'
+MODEL is required for infer mode.
+
+Use a per-model wrapper for the default infer+score flow, for example:
+  bash scripts/eval/api/eval_gpt_5_4.sh
+  bash scripts/eval/api/eval_gpt_5_4.sh infer
+  bash scripts/eval/api/eval_gpt_5_4.sh score
+
+Or call the shared driver directly with MODEL set:
+  MODEL=openai.gpt-5.4-2026-03-05 PROMPT_API_KEY=true bash scripts/eval/run_model_eval.sh
+EOF
     exit 1
   fi
 
