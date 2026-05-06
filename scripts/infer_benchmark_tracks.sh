@@ -25,8 +25,8 @@ Options:
   --prompt-variant-indices <spec>      Comma-separated indices or all. Default: all
   --max-samples <int>                  Optional cap for smoke tests. Default: 0 (all)
   --max-input-chars <int>              Skip inference for samples longer than this many chars. Default: 0 (disabled)
-  --temperature <float>                Default: 0.0
-  --top-p <float>                      Optional top-p. Default: 0 (omit)
+  --temperature <float>                Optional. Omitted by default.
+  --top-p <float>                      Optional. Omitted by default.
   --max-tokens <int>                   Default: 0 (use model/server default)
   --concurrency <int>                  Request concurrency. Default: 1
   --progress-every <int>               Default: 20
@@ -67,8 +67,8 @@ API_KEY=""
 PROMPT_VARIANT_INDICES="all"
 MAX_SAMPLES="0"
 MAX_INPUT_CHARS="0"
-TEMPERATURE="0.0"
-TOP_P="0"
+TEMPERATURE=""
+TOP_P=""
 MAX_TOKENS="0"
 CONCURRENCY="1"
 PROGRESS_EVERY="20"
@@ -195,12 +195,16 @@ for track in "${TRACKS[@]}"; do
     --prompt-variant-indices "$PROMPT_VARIANT_INDICES"
     --max-samples "$MAX_SAMPLES"
     --max-input-chars "$MAX_INPUT_CHARS"
-    --temperature "$TEMPERATURE"
-    --top-p "$TOP_P"
     --max-tokens "$MAX_TOKENS"
     --concurrency "$CONCURRENCY"
     --progress-every "$PROGRESS_EVERY"
   )
+  if [[ -n "$TEMPERATURE" ]]; then
+    cmd+=(--temperature "$TEMPERATURE")
+  fi
+  if [[ -n "$TOP_P" ]]; then
+    cmd+=(--top-p "$TOP_P")
+  fi
   if [[ -n "$BASE_URL" ]]; then
     cmd+=(--base-url "$BASE_URL")
   fi

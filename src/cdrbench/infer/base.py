@@ -38,8 +38,8 @@ class BaseInfer(ABC):
         model: str,
         concurrency: int = 8,
         max_tokens: int = 0,
-        temperature: float = 0.0,
-        top_p: float = 0.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         num_runs: int = 1,
     ) -> None:
         self.model = model

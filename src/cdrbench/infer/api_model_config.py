@@ -55,15 +55,9 @@ API_MODEL_CONFIGS: tuple[ApiModelConfig, ...] = (
         aliases=('gemini-3.1-pro-preview', 'ai_studio.gemini-3.1-pro-preview'),
     ),
     ApiModelConfig(
-        'vertex_ai.gemini-3-pro-preview',
+        'grok-4-1-fast-reasoning',
         'overseas',
-        input_field='contents',
-        aliases=('gemini-3-pro-preview',),
-    ),
-    ApiModelConfig(
-        'grok-4-1-fast-non-reasoning',
-        'overseas',
-        aliases=('grok-4-1-fast-reasoning',),
+        aliases=('grok-4-1-fast-non-reasoning',),
     ),
     ApiModelConfig('glm-4.7-inner', 'overseas'),
     ApiModelConfig('glm-image', 'overseas'),
@@ -71,11 +65,6 @@ API_MODEL_CONFIGS: tuple[ApiModelConfig, ...] = (
         'z_ai.glm-5',
         'overseas',
         aliases=('glm-5',),
-    ),
-    ApiModelConfig(
-        'kimi-k2.5',
-        'overseas',
-        aliases=('moonshot.kimi-k2.5',),
     ),
     ApiModelConfig('qwen3.6-max-preview', 'domestic'),
     ApiModelConfig('qwen3.6-plus', 'domestic'),
@@ -95,11 +84,6 @@ API_MODEL_CONFIGS: tuple[ApiModelConfig, ...] = (
         aliases=('moonshot.kimi-k2.6',),
     ),
     ApiModelConfig('glm-5.1', 'domestic'),
-    ApiModelConfig(
-        'minimax.MiniMax-M2.7',
-        'domestic',
-        aliases=('minimax-m2.5', 'minimax-m2.7', 'MiniMax-M2.5', 'MiniMax-M2.7'),
-    ),
     ApiModelConfig('xiaomi.mimo-v2.5', 'domestic'),
 )
 

@@ -38,8 +38,6 @@ class ModelConfig:
     endpoint: str
     input_field: str = "messages"
     need_max_tokens: bool = False
-    temperature: float = 0.0
-    top_p: float | None = None
     enable_thinking: bool | None = None
     thinking: dict[str, Any] | None = None
     variant_label: str = ""
@@ -54,17 +52,14 @@ ALL_MODELS: list[ModelConfig] = [
     ModelConfig("aws.claude-opus-4-6", "overseas", need_max_tokens=True, vendor="Claude"),
     ModelConfig("aws.claude-opus-4-5-20251101", "overseas", need_max_tokens=True, vendor="Claude"),
     ModelConfig("vertex_ai.gemini-3.1-pro-preview", "overseas", input_field="contents", vendor="Gemini"),
-    ModelConfig("vertex_ai.gemini-3-pro-preview", "overseas", input_field="contents", vendor="Gemini"),
-    ModelConfig("grok-4-1-fast-non-reasoning", "overseas", vendor="Grok"),
-    ModelConfig("z_ai.glm-5", "overseas", vendor="GLM"),
-    ModelConfig("kimi-k2.5", "overseas", enable_thinking=False, vendor="Kimi"),
+    ModelConfig("grok-4-1-fast-reasoning", "overseas", vendor="Grok"),
+    ModelConfig("z_ai.glm-5", "overseas", thinking={"type": "disabled"}, vendor="GLM"),
     ModelConfig("qwen3.6-max-preview", "domestic", enable_thinking=False, vendor="Qwen"),
     ModelConfig("qwen3.6-plus", "domestic", enable_thinking=False, vendor="Qwen"),
-    ModelConfig("deepseek-v4-pro", "domestic", vendor="DeepSeek"),
-    ModelConfig("deepseek-v4-flash", "domestic", vendor="DeepSeek"),
+    ModelConfig("deepseek-v4-pro", "domestic", thinking={"type": "disabled"}, vendor="DeepSeek"),
+    ModelConfig("deepseek-v4-flash", "domestic", thinking={"type": "disabled"}, vendor="DeepSeek"),
     ModelConfig("kimi-k2.6", "domestic", enable_thinking=False, vendor="Kimi"),
-    ModelConfig("minimax.MiniMax-M2.7", "domestic", vendor="MiniMax"),
-    ModelConfig("xiaomi.mimo-v2.5", "domestic", vendor="Xiaomi"),
+    ModelConfig("xiaomi.mimo-v2.5", "domestic", thinking={"type": "disabled"}, vendor="Xiaomi"),
 ]
 
 
@@ -90,8 +85,6 @@ def _clone_with_variant(
         endpoint=cfg.endpoint,
         input_field=cfg.input_field,
         need_max_tokens=cfg.need_max_tokens,
-        temperature=cfg.temperature,
-        top_p=cfg.top_p,
         enable_thinking=enable_thinking,
         thinking=thinking,
         variant_label=variant_label,
@@ -104,19 +97,6 @@ def expand_model_configs(model_name: str, lookup: dict[str, ModelConfig]) -> lis
     cfg = lookup.get(model_name)
     if cfg is None:
         return [ModelConfig(model_name, "overseas", vendor="Unknown", note="不在预定义列表中")]
-
-    normalized = model_name.strip().lower()
-    if normalized in {
-        "z_ai.glm-5",
-        "deepseek-v4-pro",
-        "deepseek-v4-flash",
-        "minimax.minimax-m2.7",
-        "xiaomi.mimo-v2.5",
-    }:
-        return [
-            _clone_with_variant(cfg, variant_label="enable_thinking=false", enable_thinking=False),
-            _clone_with_variant(cfg, variant_label='thinking={"type":"disabled"}', thinking={"type": "disabled"}),
-        ]
     return [cfg]
 
 
@@ -141,9 +121,6 @@ def build_payload(cfg: ModelConfig, prompt_bundle: dict[str, Any]) -> dict[str, 
 
     if cfg.need_max_tokens:
         payload["max_tokens"] = DEFAULT_MAX_TOKENS
-    payload["temperature"] = cfg.temperature
-    if cfg.top_p is not None and cfg.top_p > 0:
-        payload["top_p"] = cfg.top_p
     if cfg.enable_thinking is not None:
         payload["enable_thinking"] = cfg.enable_thinking
     if cfg.thinking is not None:

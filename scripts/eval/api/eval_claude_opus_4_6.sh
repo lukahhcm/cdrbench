@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../../../.." && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 cd "${REPO_ROOT}"
 
 TRACKS="${TRACKS:-atomic_ops,main,order_sensitivity}"
@@ -17,30 +17,7 @@ MAX_INPUT_CHARS="${MAX_INPUT_CHARS:-0}"
 MAX_TOKENS="${MAX_TOKENS:-0}"
 CONCURRENCY="${CONCURRENCY:-10}"
 PROGRESS_EVERY="${PROGRESS_EVERY:-20}"
+RESUME="${RESUME:-true}"
 
-cmd=(
-  "${REPO_ROOT}/scripts/infer_benchmark_tracks.sh"
-  --tracks "${TRACKS}"
-  --eval-root "${EVAL_ROOT}"
-  --model "${MODEL}"
-  --base-url "${BASE_URL}"
-  --output-root "${OUTPUT_ROOT}"
-  --prompt-variant-indices "${PROMPT_VARIANT_INDICES}"
-  --max-samples "${MAX_SAMPLES}"
-  --max-input-chars "${MAX_INPUT_CHARS}"
-  --max-tokens "${MAX_TOKENS}"
-  --concurrency "${CONCURRENCY}"
-  --progress-every "${PROGRESS_EVERY}"
-)
+exec "${REPO_ROOT}/scripts/eval/run_model_eval.sh" "$@"
 
-if [[ -n "${API_KEY}" ]]; then
-  cmd+=(--api-key "${API_KEY}")
-fi
-if [[ "${RESUME:-true}" == "true" ]]; then
-  cmd+=(--resume)
-fi
-if [[ $# -gt 0 ]]; then
-  cmd+=("$@")
-fi
-
-exec "${cmd[@]}"

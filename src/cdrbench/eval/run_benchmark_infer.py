@@ -252,9 +252,19 @@ def _is_glm5_family(model_name: str) -> bool:
     return 'glm5' in normalized
 
 
+def _is_deepseek_family(model_name: str) -> bool:
+    normalized = re.sub(r'[^a-z0-9]+', '', model_name.strip().lower())
+    return 'deepseekv4pro' in normalized or 'deepseekv4flash' in normalized
+
+
 def _is_kimi_family(model_name: str) -> bool:
     normalized = re.sub(r'[^a-z0-9]+', '', model_name.strip().lower())
     return 'kimik25' in normalized or 'kimik26' in normalized
+
+
+def _is_xiaomi_mimo_family(model_name: str) -> bool:
+    normalized = re.sub(r'[^a-z0-9]+', '', model_name.strip().lower())
+    return 'xiaomimimov25' in normalized
 
 
 def _api_extra_body_for_model(model_name: str) -> dict[str, Any]:
@@ -262,7 +272,11 @@ def _api_extra_body_for_model(model_name: str) -> dict[str, Any]:
         return {'enable_thinking': False}
     if _is_kimi_family(model_name):
         return {'enable_thinking': False}
+    if _is_deepseek_family(model_name):
+        return {'thinking': {'type': 'disabled'}}
     if _is_glm5_family(model_name):
+        return {'thinking': {'type': 'disabled'}}
+    if _is_xiaomi_mimo_family(model_name):
         return {'thinking': {'type': 'disabled'}}
     return {}
 
@@ -333,6 +347,15 @@ def _variant_prediction_completed_successfully(variant: dict[str, Any] | None) -
     if not isinstance(variant, dict):
         return False
     return variant.get('prediction_error') is None
+
+
+def _variant_prediction_should_skip_on_resume(variant: dict[str, Any] | None) -> bool:
+    if not isinstance(variant, dict):
+        return False
+    prediction_error = variant.get('prediction_error')
+    if prediction_error is None:
+        return True
+    return not str(prediction_error).startswith('request_error:')
 
 
 def _row_input_length_chars(row: dict[str, Any]) -> int:
@@ -428,8 +451,8 @@ def main() -> None:
     parser.add_argument('--model', default=None)
     parser.add_argument('--base-url', default=None)
     parser.add_argument('--api-key', default=None)
-    parser.add_argument('--temperature', type=float, default=0.0)
-    parser.add_argument('--top-p', type=float, default=0.0)
+    parser.add_argument('--temperature', type=float, default=None)
+    parser.add_argument('--top-p', type=float, default=None)
     parser.add_argument('--max-tokens', type=int, default=0)
     parser.add_argument('--prompt-variant-index', type=int, default=0)
     parser.add_argument('--prompt-variant-indices', default=None)
@@ -478,7 +501,7 @@ def main() -> None:
         existing_variant_predictions = _existing_variant_prediction_map(existing_rows_by_id.get(instance_id, {}))
         variant_predictions = dict(existing_variant_predictions)
         for prompt_variant_index in selected_prompt_variant_indices:
-            if _variant_prediction_completed_successfully(existing_variant_predictions.get(prompt_variant_index)):
+            if args.resume and _variant_prediction_should_skip_on_resume(existing_variant_predictions.get(prompt_variant_index)):
                 continue
             prompt_variant = _select_prompt_variant(row, prompt_variant_index)
             user_requirement = str(prompt_variant.get('user_requirement') or '').strip()

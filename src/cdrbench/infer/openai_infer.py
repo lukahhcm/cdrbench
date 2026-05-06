@@ -34,8 +34,8 @@ class OpenAIInfer(BaseInfer):
         api_key: str = 'EMPTY',
         concurrency: int = 8,
         max_tokens: int = 0,
-        temperature: float = 0.0,
-        top_p: float = 0.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         num_runs: int = 1,
         max_retries: int = 3,
         retry_delay: float = 1.0,
@@ -66,10 +66,11 @@ class OpenAIInfer(BaseInfer):
                 request_kwargs: Dict[str, Any] = {
                     'model': self.model,
                     'messages': messages,
-                    'temperature': self.temperature,
                     'stream': True,
                 }
-                if self.top_p > 0:
+                if self.temperature is not None:
+                    request_kwargs['temperature'] = self.temperature
+                if self.top_p is not None and self.top_p > 0:
                     request_kwargs['top_p'] = self.top_p
                 if self.max_tokens > 0:
                     request_kwargs['max_tokens'] = self.max_tokens
@@ -110,8 +111,8 @@ class CompatApiInfer(BaseInfer):
         api_key: str,
         concurrency: int = 8,
         max_tokens: int = 0,
-        temperature: float = 0.0,
-        top_p: float = 0.0,
+        temperature: float | None = None,
+        top_p: float | None = None,
         num_runs: int = 1,
         max_retries: int = 3,
         retry_delay: float = 1.0,
@@ -202,9 +203,6 @@ class CompatApiInfer(BaseInfer):
         else:
             payload['messages'] = self._build_input_messages(messages)
 
-        payload['temperature'] = self.temperature
-        if self.top_p > 0:
-            payload['top_p'] = self.top_p
         if self.max_tokens > 0:
             payload['max_tokens'] = self.max_tokens
         elif self._model_config is not None and self._model_config.need_max_tokens:
@@ -341,8 +339,8 @@ def make_vllm_infer(
     api_base: str = 'http://127.0.0.1:8901/v1',
     concurrency: int = 128,
     max_tokens: int = 0,
-    temperature: float = 0.0,
-    top_p: float = 0.0,
+    temperature: float | None = None,
+    top_p: float | None = None,
     num_runs: int = 1,
     enable_thinking: bool = False,
     max_retries: int = 2,
@@ -370,8 +368,8 @@ def make_api_infer(
     api_key: str = '',
     concurrency: int = 8,
     max_tokens: int = 0,
-    temperature: float = 0.0,
-    top_p: float = 0.0,
+    temperature: float | None = None,
+    top_p: float | None = None,
     num_runs: int = 1,
     max_retries: int = 3,
     retry_delay: float = 1.0,

@@ -19,13 +19,11 @@ OVERSEAS_MODELS=(
   "aws.claude-opus-4-6"
   "aws.claude-opus-4-5-20251101"
   "vertex_ai.gemini-3.1-pro-preview"
-  "vertex_ai.gemini-3-pro-preview"
-  "grok-4-1-fast-non-reasoning"
+  "grok-4-1-fast-reasoning"
 )
 
 EVAL_DOMESTIC_MODELS=(
   "z_ai.glm-5"
-  "kimi-k2.5"
 )
 
 DOMESTIC_MODELS=(
@@ -34,7 +32,6 @@ DOMESTIC_MODELS=(
   "deepseek-v4-pro"
   "deepseek-v4-flash"
   "kimi-k2.6"
-  "minimax.MiniMax-M2.7"
   "xiaomi.mimo-v2.5"
 )
 
