@@ -202,10 +202,6 @@ def main() -> int:
     args = parser.parse_args()
 
     prompt, prompt_source = resolve_prompt(args.eval_path)
-    prompt_preview = prompt[:120].replace("\n", " ")
-    print(f"prompt source: {prompt_source}")
-    print(f"prompt preview: {prompt_preview}")
-    print()
 
     lookup = build_model_lookup()
     results: list[dict[str, Any]] = []
@@ -235,6 +231,9 @@ def main() -> int:
         print()
 
     success_count = sum(1 for item in results if item["success"])
+    success_models = [item["model"] for item in results if item["success"]]
+    failed_models = [item["model"] for item in results if not item["success"]]
+
     print("=" * 60)
     print(f"汇总: {success_count}/{total} 个模型可用")
     print("-" * 60)
@@ -246,11 +245,20 @@ def main() -> int:
         if item.get("note"):
             print(f"      备注: {item['note']}")
 
+    print("-" * 60)
+    print("能跑的模型:")
+    for model in success_models:
+        print(f"  - {model}")
+    print("不能跑的模型:")
+    for model in failed_models:
+        print(f"  - {model}")
+
     if args.output:
         output_path = Path(args.output).resolve()
         payload = {
             "prompt_source": prompt_source,
-            "prompt_preview": prompt_preview,
+            "successful_models": success_models,
+            "failed_models": failed_models,
             "results": results,
         }
         output_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
