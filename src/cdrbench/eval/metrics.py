@@ -23,6 +23,16 @@ def normalize_text_for_match(value: Any) -> str:
     return text.strip()
 
 
+def normalize_text_for_norm_match(value: Any) -> str:
+    text = '' if value is None else str(value)
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+    text = re.sub(r'[ \t]+', ' ', text)
+    text = re.sub(r' +([,.;:!?])', r'\1', text)
+    text = re.sub(r'[ \t]+\n', '\n', text)
+    text = re.sub(r'\n(?:[ \t]*\n)+', '\n\n', text)
+    return text.strip()
+
+
 def compute_recipe_metrics(
     *,
     input_text: Any,
@@ -39,12 +49,16 @@ def compute_recipe_metrics(
     normalized_prediction_status = normalize_status(predicted_status)
     normalized_reference_text = normalize_text_for_match(raw_reference)
     normalized_prediction_text = normalize_text_for_match(raw_prediction)
+    norm_reference_text = normalize_text_for_norm_match(raw_reference)
+    norm_prediction_text = normalize_text_for_norm_match(raw_prediction)
 
     status_match = normalized_prediction_status == normalized_reference_status
     text_exact_match = raw_prediction == raw_reference
     normalized_text_exact_match = normalized_prediction_text == normalized_reference_text
+    norm_text_exact_match = norm_prediction_text == norm_reference_text
     recipe_success = status_match and text_exact_match
     normalized_recipe_success = status_match and normalized_text_exact_match
+    norm_recipe_success = status_match and norm_text_exact_match
 
     d_input = edit_distance(raw_input, raw_reference)
     d_pred = edit_distance(raw_prediction, raw_reference)
@@ -59,11 +73,15 @@ def compute_recipe_metrics(
         'normalized_predicted_status': normalized_prediction_status,
         'normalized_reference_text': normalized_reference_text,
         'normalized_predicted_text': normalized_prediction_text,
+        'norm_reference_text': norm_reference_text,
+        'norm_predicted_text': norm_prediction_text,
         'status_match': status_match,
         'text_exact_match': text_exact_match,
         'normalized_text_exact_match': normalized_text_exact_match,
+        'norm_text_exact_match': norm_text_exact_match,
         'recipe_success': recipe_success,
         'normalized_recipe_success': normalized_recipe_success,
+        'norm_recipe_success': norm_recipe_success,
         'text_match': text_exact_match,
         'edit_distance_input_to_reference': d_input,
         'edit_distance_prediction_to_reference': d_pred,

@@ -252,11 +252,15 @@ def _score_variant(prediction_row: dict[str, Any], variant_prediction: dict[str,
                 'normalized_predicted_status': '' if predicted_status is None else str(predicted_status).strip().upper(),
                 'normalized_reference_text': '',
                 'normalized_predicted_text': '',
+                'norm_reference_text': '',
+                'norm_predicted_text': '',
                 'status_match': False,
                 'text_exact_match': False,
                 'normalized_text_exact_match': False,
+                'norm_text_exact_match': False,
                 'recipe_success': False,
                 'normalized_recipe_success': False,
+                'norm_recipe_success': False,
                 'text_match': False,
                 'edit_distance_input_to_reference': None,
                 'edit_distance_prediction_to_reference': None,
@@ -293,26 +297,26 @@ def _score_prediction_row(prediction_row: dict[str, Any]) -> list[dict[str, Any]
 
 def _aggregate_instance_metrics(prediction_row: dict[str, Any], variant_rows: list[dict[str, Any]]) -> dict[str, Any]:
     request_ok_rows = [row for row in variant_rows if not bool(row.get('request_error'))]
-    recipe_success_values = [1.0 if bool(row.get('recipe_success')) else 0.0 for row in request_ok_rows]
-    normalized_recipe_success_values = [1.0 if bool(row.get('normalized_recipe_success')) else 0.0 for row in request_ok_rows]
+    strict_recipe_success_values = [1.0 if bool(row.get('recipe_success')) else 0.0 for row in request_ok_rows]
+    normalized_recipe_success_values = [1.0 if bool(row.get('norm_recipe_success')) else 0.0 for row in request_ok_rows]
     refinement_gain_values = [row.get('refinement_gain') for row in request_ok_rows]
-    recipe_success_request_ok_values = [1.0 if bool(row.get('recipe_success')) else 0.0 for row in request_ok_rows]
     prompt_variant_metrics = []
-    recipe_success_by_index: dict[int, bool | None] = {}
+    strict_recipe_success_by_index: dict[int, bool | None] = {}
     normalized_recipe_success_by_index: dict[int, bool | None] = {}
     for row in variant_rows:
         index = int(row.get('prompt_variant_index', 0) or 0)
-        recipe_success_by_index[index] = None if bool(row.get('request_error')) else bool(row.get('recipe_success'))
-        normalized_recipe_success_by_index[index] = None if bool(row.get('request_error')) else bool(row.get('normalized_recipe_success'))
+        strict_recipe_success_by_index[index] = None if bool(row.get('request_error')) else bool(row.get('recipe_success'))
+        normalized_recipe_success_by_index[index] = None if bool(row.get('request_error')) else bool(row.get('norm_recipe_success'))
         prompt_variant_metrics.append(
             {
                 'prompt_variant_index': index,
                 'prompt_style_id': row.get('prompt_style_id'),
                 'prompt_style_label': row.get('prompt_style_label'),
-                'recipe_success': bool(row.get('recipe_success')),
-                'normalized_recipe_success': bool(row.get('normalized_recipe_success')),
+                'recipe_success_strict': bool(row.get('recipe_success')),
+                'recipe_success_norm': bool(row.get('norm_recipe_success')),
                 'status_match': bool(row.get('status_match')),
-                'text_exact_match': bool(row.get('text_exact_match')),
+                'text_exact_match_strict': bool(row.get('text_exact_match')),
+                'text_exact_match_norm': bool(row.get('norm_text_exact_match')),
                 'refinement_gain': None if row.get('refinement_gain') is None else float(row.get('refinement_gain', 0.0)),
                 'prediction_error': row.get('prediction_error'),
                 'format_instability_error': bool(row.get('format_instability_error')),
@@ -325,19 +329,18 @@ def _aggregate_instance_metrics(prediction_row: dict[str, Any], variant_rows: li
         {
             'num_prompt_variants': len(variant_rows),
             'num_request_ok_variants': len(request_ok_rows),
-            'mean_rs': _mean_optional(recipe_success_values),
-            'rs_at_k': (any(recipe_success_values) if request_ok_rows else None),
-            'mean_rs_normalized': _mean_optional(normalized_recipe_success_values),
-            'rs_at_k_normalized': any(normalized_recipe_success_values),
-            'mean_rs_request_ok_only': _mean_optional(recipe_success_request_ok_values),
+            'mean_rs': _mean_optional(normalized_recipe_success_values),
+            'mean_rs@3': (any(normalized_recipe_success_values) if request_ok_rows else None),
+            'mean_rs_strict': _mean_optional(strict_recipe_success_values),
+            'mean_rs_strict@3': (any(strict_recipe_success_values) if request_ok_rows else None),
             'mean_rg': _mean_optional(refinement_gain_values),
             'num_valid_rg_variants': sum(1 for value in refinement_gain_values if value is not None),
             'num_invalid_variants': sum(1 for row in variant_rows if not bool(row.get('valid_prediction'))),
             'num_format_error_variants': sum(1 for row in variant_rows if bool(row.get('format_instability_error'))),
             'num_request_error_variants': sum(1 for row in variant_rows if bool(row.get('request_error'))),
             'prompt_variant_metrics': prompt_variant_metrics,
-            'recipe_success_prompt0': recipe_success_by_index.get(0),
-            'normalized_recipe_success_prompt0': normalized_recipe_success_by_index.get(0),
+            'recipe_success_prompt0': normalized_recipe_success_by_index.get(0),
+            'recipe_success_prompt0_strict': strict_recipe_success_by_index.get(0),
         }
     )
     return instance_row
@@ -354,15 +357,15 @@ def _build_order_group_rows(instance_rows: list[dict[str, Any]]) -> list[dict[st
             'order_group_instance_id': group_id,
             'slot_count': len(bucket),
             'ocs': (all(bool(row.get('recipe_success_prompt0')) for row in bucket) if all(row.get('recipe_success_prompt0') is not None for row in bucket) else None),
-            'ocs_at_k': (all(bool(row.get('rs_at_k')) for row in bucket) if all(row.get('rs_at_k') is not None for row in bucket) else None),
-            'ocs_normalized': (
-                all(bool(row.get('normalized_recipe_success_prompt0')) for row in bucket)
-                if all(row.get('normalized_recipe_success_prompt0') is not None for row in bucket)
+            'ocs_at_k': (all(bool(row.get('mean_rs@3')) for row in bucket) if all(row.get('mean_rs@3') is not None for row in bucket) else None),
+            'ocs_strict': (
+                all(bool(row.get('recipe_success_prompt0_strict')) for row in bucket)
+                if all(row.get('recipe_success_prompt0_strict') is not None for row in bucket)
                 else None
             ),
-            'ocs_at_k_normalized': (
-                all(bool(row.get('rs_at_k_normalized')) for row in bucket)
-                if all(row.get('rs_at_k_normalized') is not None for row in bucket)
+            'ocs_at_k_strict': (
+                all(bool(row.get('mean_rs_strict@3')) for row in bucket)
+                if all(row.get('mean_rs_strict@3') is not None for row in bucket)
                 else None
             ),
         }
@@ -380,10 +383,9 @@ def _instance_slice_summary(rows: list[dict[str, Any]], key: str) -> list[dict[s
             key: value,
             'count': len(bucket),
             'mean_rs': _mean_optional([item.get('mean_rs') if int(item.get('num_request_ok_variants', 0) or 0) > 0 else None for item in bucket]),
-            'mean_rs_normalized': _mean_optional([item.get('mean_rs_normalized') if int(item.get('num_request_ok_variants', 0) or 0) > 0 else None for item in bucket]),
-            'mean_rs_request_ok_only': _mean_optional([item.get('mean_rs_request_ok_only') for item in bucket]),
-            'rs_at_k': _rate_optional(bucket, 'rs_at_k'),
-            'rs_at_k_normalized': _rate_optional(bucket, 'rs_at_k_normalized'),
+            'mean_rs_strict': _mean_optional([item.get('mean_rs_strict') if int(item.get('num_request_ok_variants', 0) or 0) > 0 else None for item in bucket]),
+            'mean_rs@3': _rate_optional(bucket, 'mean_rs@3'),
+            'mean_rs_strict@3': _rate_optional(bucket, 'mean_rs_strict@3'),
             'mean_rg': _mean_optional([item.get('mean_rg') for item in bucket]),
         }
         for value, bucket in sorted(grouped.items())
@@ -419,17 +421,15 @@ def _variant_slice_summary(rows: list[dict[str, Any]], key: str) -> list[dict[st
         {
             key: value,
             'count': len(bucket),
-            'recipe_success_rate': _mean_optional([None if bool(row.get('request_error')) else (1.0 if bool(row.get('recipe_success')) else 0.0) for row in bucket]),
+            'recipe_success_rate': _mean_optional([None if bool(row.get('request_error')) else (1.0 if bool(row.get('norm_recipe_success')) else 0.0) for row in bucket]),
+            'recipe_success_rate_strict': _mean_optional([None if bool(row.get('request_error')) else (1.0 if bool(row.get('recipe_success')) else 0.0) for row in bucket]),
             'status_accuracy': _rate(bucket, 'status_match'),
-            'exact_text_match_rate': _rate(bucket, 'text_exact_match'),
-            'normalized_recipe_success_rate': _mean_optional([None if bool(row.get('request_error')) else (1.0 if bool(row.get('normalized_recipe_success')) else 0.0) for row in bucket]),
+            'exact_text_match_rate': _rate(bucket, 'norm_text_exact_match'),
+            'exact_text_match_rate_strict': _rate(bucket, 'text_exact_match'),
             'avg_refinement_gain': _mean_optional([row.get('refinement_gain') for row in bucket]),
             'valid_prediction_rate': _rate(bucket, 'valid_prediction'),
             'format_error_rate': _rate(bucket, 'format_instability_error'),
             'request_error_rate': _rate(bucket, 'request_error'),
-            'recipe_success_rate_request_ok_only': _mean_optional(
-                [1.0 if bool(row.get('recipe_success')) else 0.0 for row in bucket if not bool(row.get('request_error'))]
-            ),
         }
         for value, bucket in sorted(grouped.items())
     ]
@@ -441,10 +441,9 @@ def _summary_report_text(summary: dict[str, Any]) -> str:
         parts.append(f"model={summary['model']}")
     parts.append(f"num_instances={summary.get('num_instances', 0)}")
     parts.append(f"mean_rs={float(summary.get('mean_rs', 0.0)):.4f}")
-    parts.append(f"mean_rs_normalized={float(summary.get('mean_rs_normalized', 0.0)):.4f}")
-    parts.append(f"mean_rs_request_ok_only={float(summary.get('mean_rs_request_ok_only', 0.0)):.4f}")
-    parts.append(f"rs_at_k={float(summary.get('rs_at_k', 0.0)):.4f}")
-    parts.append(f"rs_at_k_normalized={float(summary.get('rs_at_k_normalized', 0.0)):.4f}")
+    parts.append(f"mean_rs_strict={float(summary.get('mean_rs_strict', 0.0)):.4f}")
+    parts.append(f"mean_rs@3={float(summary.get('mean_rs@3', 0.0)):.4f}")
+    parts.append(f"mean_rs_strict@3={float(summary.get('mean_rs_strict@3', 0.0)):.4f}")
     parts.append(f"mean_rg={float(summary.get('mean_rg', 0.0)):.4f}")
     parts.append(f"valid_prediction_rate={float(summary.get('valid_prediction_rate', 0.0)):.4f}")
     parts.append(f"empty_response_rate={float(summary.get('empty_response_rate', 0.0)):.4f}")
@@ -453,8 +452,8 @@ def _summary_report_text(summary: dict[str, Any]) -> str:
     if 'ocs' in summary:
         parts.append(f"ocs={float(summary.get('ocs', 0.0)):.4f}")
         parts.append(f"ocs_at_k={float(summary.get('ocs_at_k', 0.0)):.4f}")
-        parts.append(f"ocs_normalized={float(summary.get('ocs_normalized', 0.0)):.4f}")
-        parts.append(f"ocs_at_k_normalized={float(summary.get('ocs_at_k_normalized', 0.0)):.4f}")
+        parts.append(f"ocs_strict={float(summary.get('ocs_strict', 0.0)):.4f}")
+        parts.append(f"ocs_at_k_strict={float(summary.get('ocs_at_k_strict', 0.0)):.4f}")
     return ' '.join(parts)
 
 
@@ -464,17 +463,16 @@ def _paper_metrics_payload(summary: dict[str, Any]) -> dict[str, Any]:
         'model': summary.get('model'),
         'num_instances': summary.get('num_instances'),
         'mean_rs': summary.get('mean_rs'),
-        'mean_rs_normalized': summary.get('mean_rs_normalized'),
-        'mean_rs_request_ok_only': summary.get('mean_rs_request_ok_only'),
-        'rs_at_k': summary.get('rs_at_k'),
-        'rs_at_k_normalized': summary.get('rs_at_k_normalized'),
+        'mean_rs_strict': summary.get('mean_rs_strict'),
+        'mean_rs@3': summary.get('mean_rs@3'),
+        'mean_rs_strict@3': summary.get('mean_rs_strict@3'),
         'mean_rg': summary.get('mean_rg'),
         'valid_prediction_rate': summary.get('valid_prediction_rate'),
         'empty_response_rate': summary.get('empty_response_rate'),
         'format_error_rate': summary.get('format_error_rate'),
         'request_error_rate': summary.get('request_error_rate'),
     }
-    for key in ('ocs', 'ocs_at_k', 'ocs_normalized', 'ocs_at_k_normalized', 'rs_front', 'rs_middle', 'rs_end'):
+    for key in ('ocs', 'ocs_at_k', 'ocs_strict', 'ocs_at_k_strict', 'rs_front', 'rs_middle', 'rs_end'):
         if key in summary:
             payload[key] = summary.get(key)
     return payload
@@ -499,10 +497,9 @@ def _build_summary(
         'num_instances': len(instance_rows),
         'num_variant_predictions': len(variant_rows),
         'mean_rs': _mean_optional([row.get('mean_rs') if int(row.get('num_request_ok_variants', 0) or 0) > 0 else None for row in instance_rows]),
-        'mean_rs_normalized': _mean_optional([row.get('mean_rs_normalized') if int(row.get('num_request_ok_variants', 0) or 0) > 0 else None for row in instance_rows]),
-        'mean_rs_request_ok_only': _mean_optional([row.get('mean_rs_request_ok_only') for row in instance_rows]),
-        'rs_at_k': _rate_optional(instance_rows, 'rs_at_k'),
-        'rs_at_k_normalized': _rate_optional(instance_rows, 'rs_at_k_normalized'),
+        'mean_rs_strict': _mean_optional([row.get('mean_rs_strict') if int(row.get('num_request_ok_variants', 0) or 0) > 0 else None for row in instance_rows]),
+        'mean_rs@3': _rate_optional(instance_rows, 'mean_rs@3'),
+        'mean_rs_strict@3': _rate_optional(instance_rows, 'mean_rs_strict@3'),
         'mean_rg': _mean_optional(mean_rg_values),
         'median_rg': _safe_median([float(value) for value in mean_rg_values if value is not None]),
         'valid_prediction_rate': _rate(variant_rows, 'valid_prediction'),
@@ -518,8 +515,8 @@ def _build_summary(
     if order_group_rows:
         summary['ocs'] = _rate_optional(order_group_rows, 'ocs')
         summary['ocs_at_k'] = _rate_optional(order_group_rows, 'ocs_at_k')
-        summary['ocs_normalized'] = _rate_optional(order_group_rows, 'ocs_normalized')
-        summary['ocs_at_k_normalized'] = _rate_optional(order_group_rows, 'ocs_at_k_normalized')
+        summary['ocs_strict'] = _rate_optional(order_group_rows, 'ocs_strict')
+        summary['ocs_at_k_strict'] = _rate_optional(order_group_rows, 'ocs_at_k_strict')
         summary['rs_front'] = _safe_mean([float(row.get('mean_rs', 0.0)) for row in instance_rows if str(row.get('order_slot') or '') == 'front'])
         summary['rs_middle'] = _safe_mean([float(row.get('mean_rs', 0.0)) for row in instance_rows if str(row.get('order_slot') or '') == 'middle'])
         summary['rs_end'] = _safe_mean([float(row.get('mean_rs', 0.0)) for row in instance_rows if str(row.get('order_slot') or '') == 'end'])

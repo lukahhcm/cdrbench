@@ -65,7 +65,7 @@ def _discover_atomic_metrics(score_root: Path) -> list[dict[str, Any]]:
             {
                 'model': model,
                 'mean_rs': payload.get('mean_rs'),
-                'rs_at_k': payload.get('rs_at_k'),
+                'mean_rs@3': payload.get('mean_rs@3'),
                 'mean_rg': payload.get('mean_rg'),
                 'num_instances': payload.get('num_instances'),
                 'source_path': str(path),
@@ -89,7 +89,7 @@ def _render_table(rows: list[dict[str, Any]], *, caption: str, label: str) -> st
     for row in rows:
         model = _latex_escape(str(row.get('model') or 'unknown'))
         rs = _format_rate(row.get('mean_rs'))
-        rs_at_3 = _format_rate(row.get('rs_at_k'))
+        rs_at_3 = _format_rate(row.get('mean_rs@3'))
         mean_rg = _format_rg(row.get('mean_rg'))
         lines.append(f'{model} & {rs} & {rs_at_3} & {mean_rg} \\\\')
 
@@ -115,12 +115,12 @@ def main() -> None:
     )
     parser.add_argument(
         '--caption',
-        default='Atomic benchmark results across models. RS denotes mean recipe success, RS@3 denotes pass-at-3 recipe success across prompt variants, and Mean RG denotes mean bounded refinement gain.',
+        default='Atomic benchmark results across models. RS denotes normalized mean recipe success, Mean RS@3 denotes pass-at-3 success across prompt variants, and Mean RG denotes mean bounded refinement gain.',
     )
     parser.add_argument('--label', default='tab:atomic-results')
     parser.add_argument(
         '--sort-by',
-        choices=('mean_rs', 'rs_at_k', 'mean_rg', 'model'),
+        choices=('mean_rs', 'mean_rs@3', 'mean_rg', 'model'),
         default='mean_rs',
         help='Primary sort key for table rows.',
     )

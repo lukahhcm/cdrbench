@@ -16,7 +16,7 @@ TRACK_SPECS = {
         'label': 'tab:atomic-results-all-models',
         'columns': (
             ('mean_rs', 'RS'),
-            ('rs_at_k', 'RS@K'),
+            ('mean_rs@3', 'Mean RS@3'),
             ('mean_rg', 'Mean RG'),
         ),
     },
@@ -25,7 +25,7 @@ TRACK_SPECS = {
         'label': 'tab:main-results-all-models',
         'columns': (
             ('mean_rs', 'RS'),
-            ('rs_at_k', 'RS@K'),
+            ('mean_rs@3', 'Mean RS@3'),
             ('mean_rg', 'Mean RG'),
         ),
     },
@@ -34,7 +34,7 @@ TRACK_SPECS = {
         'label': 'tab:order-sensitivity-results-all-models',
         'columns': (
             ('mean_rs', 'RS'),
-            ('rs_at_k', 'RS@K'),
+            ('mean_rs@3', 'Mean RS@3'),
             ('ocs', 'OCS'),
             ('ocs_at_k', 'OCS@K'),
             ('rs_front', 'RS Front'),
@@ -141,7 +141,7 @@ def _discover_track_rows(score_root: Path, track: str) -> list[dict[str, Any]]:
                 'model': model_name,
                 'source': _classify_model_source(model_name),
                 'mean_rs': payload.get('mean_rs'),
-                'rs_at_k': payload.get('rs_at_k'),
+                'mean_rs@3': payload.get('mean_rs@3'),
                 'mean_rg': payload.get('mean_rg'),
                 'ocs': payload.get('ocs'),
                 'ocs_at_k': payload.get('ocs_at_k'),
@@ -218,7 +218,7 @@ def main() -> None:
     parser.add_argument(
         '--sort-by',
         default='mean_rs',
-        choices=('mean_rs', 'rs_at_k', 'mean_rg', 'ocs', 'ocs_at_k', 'model'),
+        choices=('mean_rs', 'mean_rs@3', 'mean_rg', 'ocs', 'ocs_at_k', 'model'),
         help='Primary sort key for rows inside each table.',
     )
     args = parser.parse_args()
