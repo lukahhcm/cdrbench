@@ -10,7 +10,7 @@ Usage:
 Modes:
   infer   Run inference only, resuming from existing outputs and rerunning anything that did not complete successfully.
   score   Recompute scores only, replacing each track's entire score/ directory.
-  all     Default. Run inference first, then recompute scores from scratch.
+  all     Default. Run infer + score sequentially per track.
 
 Configuration is provided by environment variables from thin model wrappers.
 For API models, leave BASE_URL unset to auto-resolve the correct endpoint from the model config.
@@ -154,6 +154,14 @@ run_score() {
   "${cmd[@]}"
 }
 
+run_all_per_track() {
+  IFS=',' read -r -a TRACK_LIST <<< "${TRACKS}"
+  for track in "${TRACK_LIST[@]}"; do
+    TRACKS="${track}" run_infer
+    TRACKS="${track}" run_score
+  done
+}
+
 case "${MODE}" in
   infer)
     run_infer "$@"
@@ -162,7 +170,6 @@ case "${MODE}" in
     run_score "$@"
     ;;
   all)
-    run_infer
-    run_score
+    run_all_per_track
     ;;
 esac

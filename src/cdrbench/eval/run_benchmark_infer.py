@@ -351,7 +351,11 @@ def _existing_variant_prediction_map(row: dict[str, Any]) -> dict[int, dict[str,
 def _variant_prediction_completed_successfully(variant: dict[str, Any] | None) -> bool:
     if not isinstance(variant, dict):
         return False
-    return variant.get('prediction_error') is None
+    if variant.get('prediction_error') is None:
+        return True
+    predicted_status = '' if variant.get('predicted_status') is None else str(variant.get('predicted_status')).strip()
+    predicted_clean_text = '' if variant.get('predicted_clean_text') is None else str(variant.get('predicted_clean_text'))
+    return bool(predicted_status) and bool(predicted_clean_text)
 
 
 def _variant_prediction_should_skip_on_resume(variant: dict[str, Any] | None) -> bool:

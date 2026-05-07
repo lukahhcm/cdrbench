@@ -369,7 +369,7 @@ Each wrapper supports three modes:
 
 - `infer`: inference only
 - `score`: scoring only
-- default: run `infer` first, then `score`
+- default: run `infer` then `score` sequentially for each track
 
 Behavior:
 
