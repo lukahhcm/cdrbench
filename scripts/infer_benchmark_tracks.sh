@@ -18,6 +18,7 @@ It stores raw model outputs so metrics can be recomputed later without rerunning
 Options:
   --eval-root <path>                   Benchmark root. Default: data/benchmark
   --output-root <path>                 Output root. Default: data/evaluation/infer
+  --predictions-filename <name>        Predictions filename per track. Default: predictions.jsonl
   --tracks <csv>                       Comma-separated tracks. Default: atomic_ops,main,order_sensitivity
   --model <name>                       API model name. Required
   --base-url <url>                     OpenAI-compatible API base URL
@@ -62,6 +63,7 @@ fi
 
 EVAL_ROOT="data/benchmark"
 OUTPUT_ROOT="data/evaluation/infer"
+PREDICTIONS_FILENAME="predictions.jsonl"
 TRACKS_CSV="atomic_ops,main,order_sensitivity"
 MODEL=""
 BASE_URL=""
@@ -86,6 +88,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --output-root)
       OUTPUT_ROOT="$2"
+      shift 2
+      ;;
+    --predictions-filename)
+      PREDICTIONS_FILENAME="$2"
       shift 2
       ;;
     --tracks)
@@ -202,7 +208,7 @@ for track in "${TRACKS[@]}"; do
   cmd=(
     "$PYTHON_BIN" -m cdrbench.eval.run_benchmark_infer
     --eval-path "$eval_path"
-    --output-path "$output_dir/predictions.jsonl"
+    --output-path "$output_dir/$PREDICTIONS_FILENAME"
     --model "$MODEL"
     --prompt-variant-indices "$PROMPT_VARIANT_INDICES"
     --prompt-mode "$PROMPT_MODE"
@@ -231,7 +237,7 @@ for track in "${TRACKS[@]}"; do
 
   echo "[run] track=$track step=infer output_dir=$output_dir"
   "${cmd[@]}"
-  echo "[done] track=$track predictions=$output_dir/predictions.jsonl"
+  echo "[done] track=$track predictions=$output_dir/$PREDICTIONS_FILENAME"
 done
 
 echo "[complete] inference finished for tracks: ${TRACKS[*]}"

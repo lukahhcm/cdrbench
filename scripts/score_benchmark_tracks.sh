@@ -18,6 +18,8 @@ track's `score/` subdirectory. It also writes slice CSVs such as `by_domain.csv`
 
 Options:
   --predictions-root <path>           Inference root. Default: data/evaluation/infer
+  --predictions-filename <name>       Predictions filename per track. Default: predictions.jsonl
+  --score-dirname <name>              Score subdirectory per track. Default: score
   --tracks <csv>                      Comma-separated tracks. Default: atomic_ops,main,order_sensitivity
   --progress-every <int>              Default: 20
   --resume                            Resume scoring from existing report files in the same directory
@@ -44,6 +46,8 @@ if [[ ! -x "$PYTHON_BIN" ]]; then
 fi
 
 PREDICTIONS_ROOT="data/evaluation/infer"
+PREDICTIONS_FILENAME="predictions.jsonl"
+SCORE_DIRNAME="score"
 TRACKS_CSV="atomic_ops,main,order_sensitivity"
 PROGRESS_EVERY="20"
 RESUME="false"
@@ -52,6 +56,14 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --predictions-root)
       PREDICTIONS_ROOT="$2"
+      shift 2
+      ;;
+    --predictions-filename)
+      PREDICTIONS_FILENAME="$2"
+      shift 2
+      ;;
+    --score-dirname)
+      SCORE_DIRNAME="$2"
       shift 2
       ;;
     --tracks)
@@ -86,8 +98,8 @@ export PYTHONPATH="$REPO_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
 IFS=',' read -r -a TRACKS <<< "$TRACKS_CSV"
 
 for track in "${TRACKS[@]}"; do
-  predictions_path="$PREDICTIONS_ROOT/$track/predictions.jsonl"
-  output_dir="$PREDICTIONS_ROOT/$track/score"
+  predictions_path="$PREDICTIONS_ROOT/$track/$PREDICTIONS_FILENAME"
+  output_dir="$PREDICTIONS_ROOT/$track/$SCORE_DIRNAME"
   mkdir -p "$output_dir"
 
   if [[ ! -f "$predictions_path" ]]; then
@@ -112,4 +124,4 @@ for track in "${TRACKS[@]}"; do
 done
 
 echo "[complete] scoring finished for tracks: ${TRACKS[*]}"
-echo "[complete] reports written under each track's score/ subdirectory in: $PREDICTIONS_ROOT"
+echo "[complete] reports written under each track's $SCORE_DIRNAME/ subdirectory in: $PREDICTIONS_ROOT"

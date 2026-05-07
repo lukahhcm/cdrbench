@@ -107,6 +107,8 @@ PREDICTIONS_ROOT="${PREDICTIONS_ROOT:-${OUTPUT_ROOT}}"
 PROMPT_VARIANT_INDICES="${PROMPT_VARIANT_INDICES:-all}"
 PROMPT_MODE="${PROMPT_MODE:-direct}"
 FEW_SHOT_SOURCE_ROOT="${FEW_SHOT_SOURCE_ROOT:-data/benchmark_full}"
+PREDICTIONS_FILENAME="${PREDICTIONS_FILENAME:-}"
+SCORE_DIRNAME="${SCORE_DIRNAME:-}"
 MAX_SAMPLES="${MAX_SAMPLES:-0}"
 MAX_INPUT_CHARS="${MAX_INPUT_CHARS:-0}"
 MAX_TOKENS="${MAX_TOKENS:-0}"
@@ -127,6 +129,14 @@ case "${PROMPT_MODE}" in
     exit 1
     ;;
 esac
+
+if [[ -z "${PREDICTIONS_FILENAME}" ]]; then
+  PREDICTIONS_FILENAME="predictions_${PROMPT_MODE}.jsonl"
+fi
+
+if [[ -z "${SCORE_DIRNAME}" ]]; then
+  SCORE_DIRNAME="score_${PROMPT_MODE}"
+fi
 
 prompt_for_api_key_if_needed() {
   if [[ "${PROMPT_API_KEY}" != "true" || -n "${API_KEY}" ]]; then
@@ -164,6 +174,7 @@ EOF
     --eval-root "${EVAL_ROOT}"
     --model "${MODEL}"
     --output-root "${OUTPUT_ROOT}"
+    --predictions-filename "${PREDICTIONS_FILENAME}"
     --prompt-variant-indices "${PROMPT_VARIANT_INDICES}"
     --prompt-mode "${PROMPT_MODE}"
     --few-shot-source-root "${FEW_SHOT_SOURCE_ROOT}"
@@ -204,6 +215,8 @@ run_score() {
     "${REPO_ROOT}/scripts/score_benchmark_tracks.sh"
     --tracks "${TRACKS}"
     --predictions-root "${PREDICTIONS_ROOT}"
+    --predictions-filename "${PREDICTIONS_FILENAME}"
+    --score-dirname "${SCORE_DIRNAME}"
     --progress-every "${PROGRESS_EVERY}"
   )
   if [[ $# -gt 0 ]]; then
