@@ -20,6 +20,9 @@ Options:
   --processed-summary-dir <path>     Benchmark-instance summary directory. Default: data/processed/benchmark_instances
   --output-dir <path>                Output subset directory. Default: data/benchmark/atomic_ops
   --rows-per-operator <int>          Max rows kept per operator. Default: 6
+  --exclude-instance-id <id>         Exclude one instance_id and backfill with the next eligible row
+  --exclude-instance-ids-file <path> Text file with one instance_id per line to exclude
+  --exclude-predictions-path <path>  predictions.jsonl; exclude compliance-failed rows and backfill
   -h, --help                         Show this help
 EOF
 }
@@ -37,6 +40,9 @@ SOURCE_DIR="data/benchmark_full/atomic_ops"
 PROCESSED_SUMMARY_DIR="data/processed/benchmark_instances"
 OUTPUT_DIR="data/benchmark/atomic_ops"
 ROWS_PER_OPERATOR="6"
+EXCLUDE_INSTANCE_IDS=()
+EXCLUDE_INSTANCE_IDS_FILE=""
+EXCLUDE_PREDICTIONS_PATH=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -56,6 +62,18 @@ while [[ $# -gt 0 ]]; do
       ROWS_PER_OPERATOR="$2"
       shift 2
       ;;
+    --exclude-instance-id)
+      EXCLUDE_INSTANCE_IDS+=("$2")
+      shift 2
+      ;;
+    --exclude-instance-ids-file)
+      EXCLUDE_INSTANCE_IDS_FILE="$2"
+      shift 2
+      ;;
+    --exclude-predictions-path)
+      EXCLUDE_PREDICTIONS_PATH="$2"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -70,8 +88,22 @@ done
 
 export PYTHONPATH="$REPO_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
 
-"$PYTHON_BIN" -m cdrbench.prepare_data.build_engineering_atomic_subset \
-  --source-dir "$SOURCE_DIR" \
-  --processed-summary-dir "$PROCESSED_SUMMARY_DIR" \
-  --output-dir "$OUTPUT_DIR" \
+cmd=(
+  "$PYTHON_BIN" -m cdrbench.prepare_data.build_engineering_atomic_subset
+  --source-dir "$SOURCE_DIR"
+  --processed-summary-dir "$PROCESSED_SUMMARY_DIR"
+  --output-dir "$OUTPUT_DIR"
   --rows-per-operator "$ROWS_PER_OPERATOR"
+)
+
+for instance_id in "${EXCLUDE_INSTANCE_IDS[@]}"; do
+  cmd+=(--exclude-instance-id "$instance_id")
+done
+if [[ -n "$EXCLUDE_INSTANCE_IDS_FILE" ]]; then
+  cmd+=(--exclude-instance-ids-file "$EXCLUDE_INSTANCE_IDS_FILE")
+fi
+if [[ -n "$EXCLUDE_PREDICTIONS_PATH" ]]; then
+  cmd+=(--exclude-predictions-path "$EXCLUDE_PREDICTIONS_PATH")
+fi
+
+"${cmd[@]}"

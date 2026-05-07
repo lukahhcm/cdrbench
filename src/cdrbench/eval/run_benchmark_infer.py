@@ -34,6 +34,22 @@ FATAL_REQUEST_ERROR_PATTERNS = (
     re.compile(r'not[^a-z0-9]+found', re.IGNORECASE),
     re.compile(r'no[^a-z0-9]+such[^a-z0-9]+model', re.IGNORECASE),
 )
+NON_SCORING_REFUSAL_PATTERNS = (
+    re.compile(r'数据不合规'),
+    re.compile(r'内容不合规'),
+    re.compile(r'输入不合规'),
+    re.compile(r'不符合规范'),
+    re.compile(r'无法处理.*合规'),
+    re.compile(r'cannot comply', re.IGNORECASE),
+    re.compile(r'cannot process', re.IGNORECASE),
+    re.compile(r"can't assist", re.IGNORECASE),
+    re.compile(r'cannot assist', re.IGNORECASE),
+    re.compile(r'not compliant', re.IGNORECASE),
+    re.compile(r'content policy', re.IGNORECASE),
+    re.compile(r'safety policy', re.IGNORECASE),
+    re.compile(r'violates? policy', re.IGNORECASE),
+    re.compile(r'policy restrictions?', re.IGNORECASE),
+)
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -298,6 +314,8 @@ def _extract_prediction_payload(response_text: str) -> tuple[dict[str, Any] | No
     tagged_payload, tagged_error = _extract_tagged_prediction_payload(response_text)
     if tagged_error is None:
         return tagged_payload, None
+    if any(pattern.search(response_text) for pattern in NON_SCORING_REFUSAL_PATTERNS):
+        return None, 'non_scoring_refusal: policy_or_compliance_refusal'
     try:
         payload = parse_json_response(response_text)
     except Exception as exc:
@@ -385,6 +403,9 @@ def _variant_prediction_completed_successfully(variant: dict[str, Any] | None) -
     if not isinstance(variant, dict):
         return False
     if bool(variant.get('valid_prediction')):
+        return True
+    prediction_error = str(variant.get('prediction_error') or '')
+    if prediction_error.startswith('non_scoring_refusal:'):
         return True
     if variant.get('prediction_error') is None:
         return True
@@ -673,7 +694,11 @@ def main() -> None:
             output_rows[row_index]['variant_predictions'] = [variant_predictions[key] for key in sorted(variant_predictions)]
             output_rows[row_index]['selected_prompt_variant_indices'] = selected_prompt_variant_indices
             _write_progress_snapshot(output_path, output_dir, output_rows, model, base_url, track_name)
-            if prediction_error is not None and stop_message is None:
+            if (
+                prediction_error is not None
+                and stop_message is None
+                and not str(prediction_error).startswith('non_scoring_refusal:')
+            ):
                 stop_message = (
                     'prediction parsing failed; stopping at current sample '
                     f'track={track_name} instance_id={instance_id or "UNKNOWN"} '

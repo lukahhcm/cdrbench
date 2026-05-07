@@ -52,6 +52,17 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
     tmp_path.replace(path)
 
 
+def _read_text_lines(path: Path) -> list[str]:
+    lines = []
+    with path.open('r', encoding='utf-8') as handle:
+        for line in handle:
+            text = line.strip()
+            if not text or text.startswith('#'):
+                continue
+            lines.append(text)
+    return lines
+
+
 def _to_int(value: Any) -> int:
     if value is None:
         return 0
@@ -115,6 +126,38 @@ def _resolve_optional_file(base_dir: Path, filename: str) -> Path | None:
     return candidate if candidate.exists() else None
 
 
+def _prediction_row_has_compliance_failure(row: dict[str, Any]) -> bool:
+    for variant in row.get('variant_predictions') or []:
+        if not isinstance(variant, dict):
+            continue
+        prediction_error = str(variant.get('prediction_error') or '')
+        raw_response = str(variant.get('raw_response') or '')
+        if prediction_error.startswith('non_scoring_refusal:'):
+            return True
+        if 'data_inspection_failed' in prediction_error or 'data_inspection_failed' in raw_response:
+            return True
+        if 'inappropriate content' in prediction_error.lower() or 'inappropriate content' in raw_response.lower():
+            return True
+    return False
+
+
+def _load_excluded_instance_ids(
+    manual_ids: list[str],
+    ids_file: Path | None,
+    predictions_path: Path | None,
+) -> set[str]:
+    excluded = {text.strip() for text in manual_ids if str(text).strip()}
+    if ids_file is not None:
+        for line in _read_text_lines(ids_file):
+            excluded.add(line)
+    if predictions_path is not None:
+        for row in _read_jsonl(predictions_path):
+            instance_id = str(row.get('instance_id') or '').strip()
+            if instance_id and _prediction_row_has_compliance_failure(row):
+                excluded.add(instance_id)
+    return excluded
+
+
 def _operator_rank_key(row: dict[str, Any]) -> tuple[int, int, int, str]:
     return (
         _to_int(row.get('selected_count')),
@@ -169,16 +212,26 @@ def main() -> None:
     parser.add_argument('--output-dir', default='data/benchmark/atomic_ops')
     parser.add_argument('--processed-summary-dir', default='data/processed/benchmark_instances')
     parser.add_argument('--rows-per-operator', type=int, default=6)
+    parser.add_argument('--exclude-instance-id', action='append', default=[])
+    parser.add_argument('--exclude-instance-ids-file', default=None)
+    parser.add_argument('--exclude-predictions-path', default=None)
     args = parser.parse_args()
 
     source_dir = Path(args.source_dir).resolve()
     output_dir = Path(args.output_dir).resolve()
     processed_summary_dir = Path(args.processed_summary_dir).resolve()
+    exclude_instance_ids_file = Path(args.exclude_instance_ids_file).resolve() if args.exclude_instance_ids_file else None
+    exclude_predictions_path = Path(args.exclude_predictions_path).resolve() if args.exclude_predictions_path else None
     if args.rows_per_operator <= 0:
         raise SystemExit('--rows-per-operator must be > 0')
 
     atomic_path = _resolve_source_file(source_dir, 'atomic_ops.jsonl')
     full_rows = _read_jsonl(atomic_path)
+    excluded_instance_ids = _load_excluded_instance_ids(
+        manual_ids=list(args.exclude_instance_id),
+        ids_file=exclude_instance_ids_file,
+        predictions_path=exclude_predictions_path,
+    )
 
     summary_path = _resolve_optional_file(processed_summary_dir, 'atomic_ops_summary.csv')
     manifest_by_operator = _summary_manifest(_read_csv(summary_path)) if summary_path is not None else {}
@@ -188,10 +241,16 @@ def main() -> None:
         raise SystemExit(f'no usable atomic operators found in {atomic_path}')
 
     rows_by_operator: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    excluded_by_operator: dict[str, int] = defaultdict(int)
     for row in full_rows:
         operator = str(row.get('operator') or '')
-        if operator in manifest_by_operator:
-            rows_by_operator[operator].append(row)
+        if operator not in manifest_by_operator:
+            continue
+        instance_id = str(row.get('instance_id') or '').strip()
+        if instance_id in excluded_instance_ids:
+            excluded_by_operator[operator] += 1
+            continue
+        rows_by_operator[operator].append(row)
 
     subset_rows: list[dict[str, Any]] = []
     manifest_rows: list[dict[str, Any]] = []
@@ -209,6 +268,8 @@ def main() -> None:
                 'subset_drop_count': sum(
                     1 for row in sampled_rows if str(row.get('reference_status') or '').upper() == 'DROP'
                 ),
+                'excluded_instance_count': excluded_by_operator.get(operator, 0),
+                'eligible_candidate_count': len(rows_by_operator.get(operator, [])),
             }
         )
 
@@ -219,7 +280,7 @@ def main() -> None:
 
     print(
         f'wrote engineering atomic subset: operators={len(manifest_rows)} rows={len(subset_rows)} '
-        f'-> {output_dir / "atomic_ops.jsonl"}',
+        f'excluded_instances={len(excluded_instance_ids)} -> {output_dir / "atomic_ops.jsonl"}',
         flush=True,
     )
     print(f'wrote subset summary -> {output_dir / "atomic_ops_summary.csv"}', flush=True)

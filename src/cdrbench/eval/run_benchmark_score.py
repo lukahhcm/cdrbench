@@ -142,7 +142,8 @@ def _is_format_instability_error(error_text: Any) -> bool:
 def _is_request_error(error_text: Any) -> bool:
     if error_text is None:
         return False
-    return str(error_text).startswith('request_error:')
+    text = str(error_text)
+    return text.startswith('request_error:') or text.startswith('non_scoring_refusal:')
 
 
 def _normalize_variant_predictions(row: dict[str, Any]) -> list[dict[str, Any]]:
