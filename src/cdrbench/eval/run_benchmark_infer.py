@@ -337,6 +337,30 @@ def _has_valid_prediction(prediction_payload: dict[str, Any] | None) -> bool:
     return has_status and has_text
 
 
+def _has_nonempty_prediction_fields(variant: dict[str, Any] | None) -> bool:
+    if not isinstance(variant, dict):
+        return False
+    predicted_status = '' if variant.get('predicted_status') is None else str(variant.get('predicted_status')).strip()
+    predicted_clean_text = '' if variant.get('predicted_clean_text') is None else str(variant.get('predicted_clean_text'))
+    return bool(predicted_status) and bool(predicted_clean_text)
+
+
+def _normalize_existing_variant_prediction(variant: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(variant)
+    has_fields = _has_nonempty_prediction_fields(normalized)
+    valid_prediction = bool(
+        normalized.get('valid_prediction')
+        if 'valid_prediction' in normalized
+        else normalized.get('prediction_valid_json')
+    )
+    if has_fields:
+        valid_prediction = True
+        normalized['prediction_error'] = None
+    normalized['valid_prediction'] = valid_prediction
+    normalized.pop('prediction_valid_json', None)
+    return normalized
+
+
 def _existing_variant_prediction_map(row: dict[str, Any]) -> dict[int, dict[str, Any]]:
     variants = row.get('variant_predictions')
     if not isinstance(variants, list):
@@ -344,18 +368,27 @@ def _existing_variant_prediction_map(row: dict[str, Any]) -> dict[int, dict[str,
     mapping: dict[int, dict[str, Any]] = {}
     for variant in variants:
         if isinstance(variant, dict):
-            mapping[int(variant.get('prompt_variant_index', 0) or 0)] = variant
+            normalized_variant = _normalize_existing_variant_prediction(variant)
+            mapping[int(normalized_variant.get('prompt_variant_index', 0) or 0)] = normalized_variant
     return mapping
+
+
+def _normalize_existing_prediction_row(row: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(row)
+    variant_map = _existing_variant_prediction_map(normalized)
+    if variant_map:
+        normalized['variant_predictions'] = [variant_map[key] for key in sorted(variant_map)]
+    return normalized
 
 
 def _variant_prediction_completed_successfully(variant: dict[str, Any] | None) -> bool:
     if not isinstance(variant, dict):
         return False
+    if bool(variant.get('valid_prediction')):
+        return True
     if variant.get('prediction_error') is None:
         return True
-    predicted_status = '' if variant.get('predicted_status') is None else str(variant.get('predicted_status')).strip()
-    predicted_clean_text = '' if variant.get('predicted_clean_text') is None else str(variant.get('predicted_clean_text'))
-    return bool(predicted_status) and bool(predicted_clean_text)
+    return _has_nonempty_prediction_fields(variant)
 
 
 def _variant_prediction_should_skip_on_resume(variant: dict[str, Any] | None) -> bool:
@@ -489,6 +522,7 @@ def main() -> None:
     existing_rows_by_id: dict[str, dict[str, Any]] = {}
     if args.resume and output_path.exists():
         for row in _read_jsonl(output_path):
+            row = _normalize_existing_prediction_row(row)
             instance_id = str(row.get('instance_id') or '')
             if instance_id:
                 existing_rows_by_id[instance_id] = row
@@ -538,6 +572,8 @@ def main() -> None:
         )
 
     track_name = eval_path.stem or 'unknown'
+    if args.resume and output_path.exists():
+        _write_progress_snapshot(output_path, output_dir, output_rows, model, base_url, track_name)
     print(
         f'start infer track={track_name} model={model} '
         f'num_rows={len(rows)} progress_every={args.progress_every} resume={bool(args.resume)} '
