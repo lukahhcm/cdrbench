@@ -23,6 +23,8 @@ Options:
   --base-url <url>                     OpenAI-compatible API base URL
   --api-key <key>                      API key. For local vLLM you can use EMPTY
   --prompt-variant-indices <spec>      Comma-separated indices or all. Default: all
+  --prompt-mode <mode>                 Prompt construction mode. Default: direct
+  --few-shot-source-root <path>        Full benchmark root for few-shot examples. Default: data/benchmark_full
   --max-samples <int>                  Optional cap for smoke tests. Default: 0 (all)
   --max-input-chars <int>              Skip inference for samples longer than this many chars. Default: 0 (disabled)
   --temperature <float>                Optional. Omitted by default.
@@ -65,6 +67,8 @@ MODEL=""
 BASE_URL=""
 API_KEY=""
 PROMPT_VARIANT_INDICES="all"
+PROMPT_MODE="direct"
+FEW_SHOT_SOURCE_ROOT="data/benchmark_full"
 MAX_SAMPLES="0"
 MAX_INPUT_CHARS="0"
 TEMPERATURE=""
@@ -102,6 +106,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --prompt-variant-indices)
       PROMPT_VARIANT_INDICES="$2"
+      shift 2
+      ;;
+    --prompt-mode)
+      PROMPT_MODE="$2"
+      shift 2
+      ;;
+    --few-shot-source-root)
+      FEW_SHOT_SOURCE_ROOT="$2"
       shift 2
       ;;
     --max-samples)
@@ -193,6 +205,8 @@ for track in "${TRACKS[@]}"; do
     --output-path "$output_dir/predictions.jsonl"
     --model "$MODEL"
     --prompt-variant-indices "$PROMPT_VARIANT_INDICES"
+    --prompt-mode "$PROMPT_MODE"
+    --few-shot-source-root "$FEW_SHOT_SOURCE_ROOT"
     --max-samples "$MAX_SAMPLES"
     --max-input-chars "$MAX_INPUT_CHARS"
     --max-tokens "$MAX_TOKENS"

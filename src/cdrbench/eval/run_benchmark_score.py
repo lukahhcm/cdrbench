@@ -214,6 +214,7 @@ def _base_identity(row: dict[str, Any]) -> dict[str, Any]:
         'recipe_id',
         'recipe_variant_id',
         'recipe_type',
+        'prompt_mode',
     ]
     return {key: row[key] for key in keys if key in row}
 

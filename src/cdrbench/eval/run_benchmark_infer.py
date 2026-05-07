@@ -17,8 +17,10 @@ from cdrbench.llm_utils import parse_json_response, resolve_api_key, resolve_bas
 
 ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_PROMPT_CONFIG = ROOT / 'configs' / 'recipe_prompting.yaml'
+DEFAULT_FEW_SHOT_SOURCE_ROOT = ROOT / 'data' / 'benchmark_full'
 DEFAULT_PROGRESS_EVERY = 20
 LOCAL_HOSTS = {'127.0.0.1', '0.0.0.0', '::1', 'localhost'}
+PROMPT_MODES = ('direct', 'few_shot', 'plan_first', 'state_aware')
 FATAL_REQUEST_ERROR_PATTERNS = (
     re.compile(r'\b400\b'),
     re.compile(r'\b401\b'),
@@ -59,6 +61,17 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
             if line.strip():
                 rows.append(json.loads(line))
     return rows
+
+
+def _resolve_track_source_path(source_root: Path, track_name: str) -> Path:
+    filename = f'{track_name}.jsonl'
+    direct = source_root / track_name / filename
+    if direct.exists():
+        return direct
+    fallback = source_root / filename
+    if fallback.exists():
+        return fallback
+    raise FileNotFoundError(f'few-shot source file not found for track={track_name}: {direct} or {fallback}')
 
 
 def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
@@ -258,6 +271,215 @@ def _render_user_prompt(row: dict[str, Any], user_requirement: str, output_hint:
     )
 
 
+def _reference_tagged_output(row: dict[str, Any]) -> str:
+    return (
+        f"<status>{str(row.get('reference_status') or '').strip().upper()}</status>"
+        f"<clean_text>{str(row.get('reference_text') or '')}</clean_text>"
+    )
+
+
+def _selection_key(row: dict[str, Any]) -> str:
+    if str(row.get('benchmark_track') or '') == 'atomic':
+        return str(row.get('operator') or '')
+    benchmark_track = str(row.get('benchmark_track') or '')
+    if benchmark_track == 'order_sensitivity':
+        return str(row.get('order_family_id') or '')
+    return str(row.get('recipe_variant_id') or '')
+
+
+def _select_variant_for_style(row: dict[str, Any], preferred_style_id: str | None) -> dict[str, Any]:
+    prompt_variants = row.get('prompt_variants')
+    if isinstance(prompt_variants, list) and prompt_variants:
+        if preferred_style_id:
+            for variant in prompt_variants:
+                if isinstance(variant, dict) and str(variant.get('style_id') or '') == preferred_style_id:
+                    return variant
+        for variant in prompt_variants:
+            if isinstance(variant, dict):
+                return variant
+    user_requirement = str(row.get('user_requirement') or '').strip()
+    if user_requirement:
+        return {
+            'style_id': str(row.get('style_id') or 'single_prompt'),
+            'style_label': str(row.get('style_label') or 'Single Prompt'),
+            'user_requirement': user_requirement,
+        }
+    return {'style_id': '', 'style_label': '', 'user_requirement': ''}
+
+
+def _few_shot_examples(
+    candidate_rows: list[dict[str, Any]],
+    *,
+    preferred_style_id: str,
+    max_examples: int = 2,
+) -> list[dict[str, str]]:
+    def few_shot_rank(candidate: dict[str, Any]) -> tuple[int, int, str, str]:
+        input_length = int(candidate.get('input_length_chars', 0) or 0)
+        reference_length = len(str(candidate.get('reference_text') or ''))
+        return (
+            input_length if input_length > 0 else len(str(candidate.get('input_text') or '')),
+            reference_length,
+            str(candidate.get('source_record_id') or ''),
+            str(candidate.get('instance_id') or ''),
+        )
+
+    chosen_rows = sorted(candidate_rows, key=few_shot_rank)[:max_examples]
+    examples = []
+    for candidate in chosen_rows:
+        variant = _select_variant_for_style(candidate, preferred_style_id)
+        examples.append(
+            {
+                'user_requirement': str(variant.get('user_requirement') or '').strip(),
+                'input_text': str(candidate.get('input_text') or ''),
+                'reference_output': _reference_tagged_output(candidate),
+            }
+        )
+    return examples
+
+
+def _format_few_shot_prompt(
+    row: dict[str, Any],
+    user_requirement: str,
+    output_hint: str,
+    *,
+    examples: list[dict[str, str]],
+) -> str:
+    sections = []
+    for index, example in enumerate(examples, start=1):
+        sections.append(
+            "\n".join(
+                [
+                    f"Example {index}",
+                    "Task:",
+                    example['user_requirement'],
+                    "",
+                    "Raw input text:",
+                    "<input>",
+                    example['input_text'],
+                    "</input>",
+                    "",
+                    "Correct output:",
+                    example['reference_output'],
+                ]
+            )
+        )
+    sections.append(_render_user_prompt(row, user_requirement, output_hint))
+    return "\n\n".join(section for section in sections if section.strip())
+
+
+def _format_filter_rule(op_name: str, params: Any) -> str:
+    if isinstance(params, dict) and params:
+        detail = ', '.join(f'{key}={value}' for key, value in sorted(params.items()))
+        return f'{op_name} with {detail}'
+    return op_name
+
+
+def _execution_steps(row: dict[str, Any]) -> list[str]:
+    operator_sequence = row.get('operator_sequence')
+    if isinstance(operator_sequence, list) and operator_sequence:
+        sequence = [str(item) for item in operator_sequence if str(item).strip()]
+    else:
+        sequence = [str(row.get('operator') or '').strip()] if str(row.get('operator') or '').strip() else []
+    filter_params = row.get('filter_params_by_name') if isinstance(row.get('filter_params_by_name'), dict) else {}
+    if not sequence:
+        return ["1. Step 1: Apply the requested refinement.\n   Input state: S0\n   Output state: S1"]
+    lines = ["Execution path:"]
+    current_state_index = 0
+    for index, op_name in enumerate(sequence, start=1):
+        params = filter_params.get(op_name)
+        if op_name.endswith('_filter'):
+            input_state = f'S{current_state_index}'
+            lines.append(
+                "\n".join(
+                    [
+                        f"{index}. Step {index}: Filter at {input_state} using { _format_filter_rule(op_name, params) }",
+                        f"   Input state: {input_state}",
+                        f"   Output: KEEP and remain at {input_state}, or DROP at {input_state}",
+                    ]
+                )
+            )
+        else:
+            input_state = f'S{current_state_index}'
+            current_state_index += 1
+            output_state = f'S{current_state_index}'
+            lines.append(
+                "\n".join(
+                    [
+                        f"{index}. Step {index}: Apply { _format_filter_rule(op_name, params) }",
+                        f"   Input state: {input_state}",
+                        f"   Output state: {output_state}",
+                    ]
+                )
+            )
+    return lines
+
+
+def _format_plan_first_prompt(row: dict[str, Any], user_requirement: str, output_hint: str) -> str:
+    return (
+        f"Task:\n{user_requirement}\n\n"
+        "Before cleaning the text, first write a short analysis block in <analyze>...</analyze>.\n"
+        "Use that block to restate the requested procedure as a concise standardized execution recipe.\n"
+        "List the steps in order. For each step, say what to do and include the relevant rule or threshold when there is one.\n\n"
+        "Example analysis format:\n"
+        "<analyze>\n"
+        "Step 1: Remove repeated sentences.\n"
+        "Step 2: Normalize whitespace.\n"
+        "Step 3: Apply the word repetition filter with ratio <= 0.2, and drop the text if it fails.\n"
+        "</analyze>\n\n"
+        "Raw input text:\n"
+        "<input>\n"
+        f"{str(row.get('input_text', ''))}\n"
+        "</input>\n\n"
+        "Then execute the procedure on the text.\n"
+        f"After the analysis block, output the final tagged result using exactly this format: {output_hint}\n"
+        "Rules:\n"
+        "- Output exactly one <analyze>...</analyze> block before the final tagged result.\n"
+        "- Inside <analyze>, write an ordered step list for the intended execution recipe.\n"
+        "- For each step, include the relevant rule or threshold when there is one.\n"
+        "- status must be KEEP or DROP inside <status>...</status>.\n"
+        "- Put the output text inside <clean_text>...</clean_text>.\n"
+        "- If status is DROP, stop at the rejection point and return the current text.\n"
+        "- Do not output markdown, code fences, or explanations outside <analyze>.\n"
+    )
+
+
+def _format_state_aware_prompt(row: dict[str, Any], user_requirement: str, output_hint: str) -> str:
+    return (
+        f"Task:\n{user_requirement}\n\n"
+        "Before cleaning the text, first write a short analysis block in <analyze>...</analyze>.\n"
+        "Use that block to identify the intermediate text states that matter for correctness.\n"
+        "You may refer to them with names such as S0, S1, and S2.\n"
+        "Only text-changing steps should create a new state, while filter steps should be described as operating on the relevant existing state.\n"
+        "Focus on which operation or filter should be applied to which state, especially when order matters.\n\n"
+        "Example analysis format:\n"
+        "<analyze>\n"
+        "A useful state view is S0 = raw text and S1 = text after repeated-sentence removal.\n"
+        "The key risk is applying the repetition filter on S0 instead of S1; this filter should be evaluated on S1 because the cleanup step changes the statistics.\n"
+        "</analyze>\n\n"
+        "In that analysis:\n"
+        "- refer only to the states or transitions most likely to change the result if used incorrectly;\n"
+        "- emphasize the specific state where an important filter or operation must be applied;\n"
+        "- do not analyze every step if most steps are unambiguous.\n\n"
+        "Then apply the intended procedure to the text.\n"
+        "If a filter rejects the sample, stop at the last valid state and return DROP.\n\n"
+        "Raw input text:\n"
+        "<input>\n"
+        f"{str(row.get('input_text', ''))}\n"
+        "</input>\n\n"
+        "After the analysis block, return the final tagged output only.\n"
+        f"Use exactly this format: {output_hint}\n"
+        "Rules:\n"
+        "- Output exactly one <analyze>...</analyze> block before the final tagged result.\n"
+        "- In <analyze>, use state language only when it helps clarify which intermediate text a key operation or filter should use.\n"
+        "- Focus on state confusions that could materially change the result, especially order-sensitive filter decisions.\n"
+        "- status must be KEEP or DROP inside <status>...</status>.\n"
+        "- Put the output text inside <clean_text>...</clean_text>.\n"
+        "- If status is KEEP, clean_text must be the final state text.\n"
+        "- If status is DROP, clean_text must be the text state at the point where the sample is rejected.\n"
+        "- Do not output markdown, code fences, or explanations outside <analyze>.\n"
+    )
+
+
 def _is_qwen_family(model_name: str) -> bool:
     normalized = re.sub(r'[^a-z0-9]+', '', model_name.strip().lower())
     return 'qwen' in normalized
@@ -290,7 +512,21 @@ def _api_extra_body_for_model(model_name: str) -> dict[str, Any]:
     return {}
 
 
-def _final_user_prompt(row: dict[str, Any], user_requirement: str, output_hint: str, model_name: str) -> str:
+def _final_user_prompt(
+    row: dict[str, Any],
+    user_requirement: str,
+    output_hint: str,
+    model_name: str,
+    *,
+    prompt_mode: str,
+    few_shot_examples: list[dict[str, str]] | None = None,
+) -> str:
+    if prompt_mode == 'few_shot':
+        return _format_few_shot_prompt(row, user_requirement, output_hint, examples=few_shot_examples or [])
+    if prompt_mode == 'plan_first':
+        return _format_plan_first_prompt(row, user_requirement, output_hint)
+    if prompt_mode == 'state_aware':
+        return _format_state_aware_prompt(row, user_requirement, output_hint)
     return _render_user_prompt(row, user_requirement, output_hint)
 
 
@@ -514,6 +750,8 @@ def main() -> None:
     parser.add_argument('--max-tokens', type=int, default=0)
     parser.add_argument('--prompt-variant-index', type=int, default=0)
     parser.add_argument('--prompt-variant-indices', default=None)
+    parser.add_argument('--prompt-mode', choices=PROMPT_MODES, default='direct')
+    parser.add_argument('--few-shot-source-root', default=str(DEFAULT_FEW_SHOT_SOURCE_ROOT))
     parser.add_argument('--max-samples', type=int, default=0)
     parser.add_argument('--max-input-chars', type=int, default=0)
     parser.add_argument('--max-retries', type=int, default=4)
@@ -530,6 +768,21 @@ def main() -> None:
     system_prompt = _default_system_prompt(prompt_cfg)
     output_hint = _tagged_output_hint(prompt_cfg)
     rows = _read_jsonl(eval_path)
+    few_shot_candidate_rows: list[dict[str, Any]] = []
+    if args.prompt_mode == 'few_shot':
+        track_name = eval_path.stem or 'unknown'
+        few_shot_source_root = Path(args.few_shot_source_root).resolve()
+        few_shot_source_path = _resolve_track_source_path(few_shot_source_root, track_name)
+        selected_instance_ids = {
+            str(row.get('instance_id') or '').strip()
+            for row in rows
+            if str(row.get('instance_id') or '').strip()
+        }
+        few_shot_candidate_rows = [
+            row
+            for row in _read_jsonl(few_shot_source_path)
+            if str(row.get('instance_id') or '').strip() not in selected_instance_ids
+        ]
     if args.max_samples > 0:
         rows = rows[: args.max_samples]
     if args.max_input_chars > 0:
@@ -564,6 +817,12 @@ def main() -> None:
                 continue
             prompt_variant = _select_prompt_variant(row, prompt_variant_index)
             user_requirement = str(prompt_variant.get('user_requirement') or '').strip()
+            few_shot_examples = None
+            if args.prompt_mode == 'few_shot':
+                few_shot_examples = _few_shot_examples(
+                    few_shot_candidate_rows,
+                    preferred_style_id=str(prompt_variant.get('style_id') or ''),
+                )
             variant_jobs.append(
                 (
                     row_index,
@@ -573,9 +832,20 @@ def main() -> None:
                         'prompt_style_id': str(prompt_variant.get('style_id') or ''),
                         'prompt_style_label': str(prompt_variant.get('style_label') or ''),
                         'user_requirement': user_requirement,
+                        'prompt_mode': args.prompt_mode,
                         'messages': [
                             {'role': 'system', 'content': system_prompt},
-                            {'role': 'user', 'content': _final_user_prompt(row, user_requirement, output_hint, model)},
+                            {
+                                'role': 'user',
+                                'content': _final_user_prompt(
+                                    row,
+                                    user_requirement,
+                                    output_hint,
+                                    model,
+                                    prompt_mode=args.prompt_mode,
+                                    few_shot_examples=few_shot_examples,
+                                ),
+                            },
                         ],
                     },
                     variant_predictions,
@@ -587,6 +857,7 @@ def main() -> None:
                 **_base_inference_row(row),
                 'request_model': model,
                 'request_base_url': base_url,
+                'prompt_mode': args.prompt_mode,
                 'selected_prompt_variant_indices': selected_prompt_variant_indices,
                 'variant_predictions': [existing_variant_predictions[key] for key in sorted(existing_variant_predictions)],
             }
@@ -598,7 +869,7 @@ def main() -> None:
     print(
         f'start infer track={track_name} model={model} '
         f'num_rows={len(rows)} progress_every={args.progress_every} resume={bool(args.resume)} '
-        f'concurrency={max(1, int(args.concurrency))} base_url={base_url}',
+        f'concurrency={max(1, int(args.concurrency))} base_url={base_url} prompt_mode={args.prompt_mode}',
         flush=True,
     )
 
@@ -680,6 +951,7 @@ def main() -> None:
                 'prompt_style_id': meta['prompt_style_id'],
                 'prompt_style_label': meta['prompt_style_label'],
                 'user_requirement': meta['user_requirement'],
+                'prompt_mode': meta.get('prompt_mode') or args.prompt_mode,
                 'request_model': model,
                 'request_base_url': base_url,
                 'raw_response': response_text,

@@ -6,11 +6,19 @@ usage() {
 Usage:
   run_model_eval.sh [infer|score|all]
   run_model_eval.sh --mode <infer|score|all>
+  run_model_eval.sh [infer|score|all] --mode <direct|few_shot|plan_first|state_aware>
+  run_model_eval.sh --prompt-mode <direct|few_shot|plan_first|state_aware>
 
 Modes:
   infer   Run inference only, resuming from existing outputs and rerunning anything that did not complete successfully.
   score   Recompute scores only, replacing each track's entire score/ directory.
   all     Default. Run infer + score sequentially per track.
+
+Prompt modes:
+  direct
+  few_shot
+  plan_first
+  state_aware
 
 Configuration is provided by environment variables from thin model wrappers.
 For API models, leave BASE_URL unset to auto-resolve the correct endpoint from the model config.
@@ -28,22 +36,55 @@ if [[ ! -x "${PYTHON_BIN}" ]]; then
 fi
 
 MODE="all"
-if [[ $# -gt 0 ]]; then
+PROMPT_MODE_OVERRIDE=""
+EXTRA_ARGS=()
+
+while [[ $# -gt 0 ]]; do
   case "$1" in
     infer|score|all)
       MODE="$1"
       shift 1
       ;;
     --mode)
-      MODE="$2"
+      if [[ $# -lt 2 ]]; then
+        echo "--mode requires a value." >&2
+        usage
+        exit 1
+      fi
+      case "$2" in
+        infer|score|all)
+          MODE="$2"
+          ;;
+        direct|few_shot|plan_first|state_aware)
+          PROMPT_MODE_OVERRIDE="$2"
+          ;;
+        *)
+          echo "Unsupported --mode value: $2" >&2
+          usage
+          exit 1
+          ;;
+      esac
+      shift 2
+      ;;
+    --prompt-mode)
+      if [[ $# -lt 2 ]]; then
+        echo "--prompt-mode requires a value." >&2
+        usage
+        exit 1
+      fi
+      PROMPT_MODE_OVERRIDE="$2"
       shift 2
       ;;
     -h|--help)
       usage
       exit 0
       ;;
+    *)
+      EXTRA_ARGS+=("$1")
+      shift 1
+      ;;
   esac
-fi
+done
 
 case "${MODE}" in
   infer|score|all)
@@ -64,12 +105,28 @@ PROMPT_API_KEY="${PROMPT_API_KEY:-false}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-data/evaluation/infer}"
 PREDICTIONS_ROOT="${PREDICTIONS_ROOT:-${OUTPUT_ROOT}}"
 PROMPT_VARIANT_INDICES="${PROMPT_VARIANT_INDICES:-all}"
+PROMPT_MODE="${PROMPT_MODE:-direct}"
+FEW_SHOT_SOURCE_ROOT="${FEW_SHOT_SOURCE_ROOT:-data/benchmark_full}"
 MAX_SAMPLES="${MAX_SAMPLES:-0}"
 MAX_INPUT_CHARS="${MAX_INPUT_CHARS:-0}"
 MAX_TOKENS="${MAX_TOKENS:-0}"
 CONCURRENCY="${CONCURRENCY:-4}"
 PROGRESS_EVERY="${PROGRESS_EVERY:-20}"
 RESUME="${RESUME:-true}"
+
+if [[ -n "${PROMPT_MODE_OVERRIDE}" ]]; then
+  PROMPT_MODE="${PROMPT_MODE_OVERRIDE}"
+fi
+
+case "${PROMPT_MODE}" in
+  direct|few_shot|plan_first|state_aware)
+    ;;
+  *)
+    echo "Unsupported prompt mode: ${PROMPT_MODE}" >&2
+    usage
+    exit 1
+    ;;
+esac
 
 prompt_for_api_key_if_needed() {
   if [[ "${PROMPT_API_KEY}" != "true" || -n "${API_KEY}" ]]; then
@@ -108,6 +165,8 @@ EOF
     --model "${MODEL}"
     --output-root "${OUTPUT_ROOT}"
     --prompt-variant-indices "${PROMPT_VARIANT_INDICES}"
+    --prompt-mode "${PROMPT_MODE}"
+    --few-shot-source-root "${FEW_SHOT_SOURCE_ROOT}"
     --max-samples "${MAX_SAMPLES}"
     --max-input-chars "${MAX_INPUT_CHARS}"
     --max-tokens "${MAX_TOKENS}"
@@ -164,10 +223,10 @@ run_all_per_track() {
 
 case "${MODE}" in
   infer)
-    run_infer "$@"
+    run_infer "${EXTRA_ARGS[@]}"
     ;;
   score)
-    run_score "$@"
+    run_score "${EXTRA_ARGS[@]}"
     ;;
   all)
     run_all_per_track

@@ -149,6 +149,9 @@ def _eval_row(
         'input_length_bucket',
         'reference_status',
         'reference_text',
+        'operator_sequence',
+        'filter_params_by_name',
+        'filter_name',
     ]
     output_row = {
         'recipe_id': _first_present(row, 'recipe_id', 'workflow_id'),
