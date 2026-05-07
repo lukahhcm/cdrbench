@@ -8,7 +8,7 @@ Usage:
   run_model_eval.sh --mode <infer|score|all>
 
 Modes:
-  infer   Run inference only, resuming from existing outputs and only rerunning request errors.
+  infer   Run inference only, resuming from existing outputs and rerunning anything that did not complete successfully.
   score   Recompute scores only, replacing each track's entire score/ directory.
   all     Default. Run inference first, then recompute scores from scratch.
 

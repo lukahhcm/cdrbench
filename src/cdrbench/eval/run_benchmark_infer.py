@@ -325,6 +325,18 @@ def _extract_prediction_fields(prediction_payload: dict[str, Any] | None) -> tup
     return ('' if status_value is None else str(status_value), '' if text_value is None else str(text_value))
 
 
+def _has_valid_prediction(prediction_payload: dict[str, Any] | None) -> bool:
+    if not isinstance(prediction_payload, dict):
+        return False
+    has_status = prediction_payload.get('predicted_status', prediction_payload.get('status')) is not None
+    has_text = (
+        prediction_payload.get('predicted_clean_text') is not None
+        or prediction_payload.get('clean_text') is not None
+        or prediction_payload.get('text') is not None
+    )
+    return has_status and has_text
+
+
 def _existing_variant_prediction_map(row: dict[str, Any]) -> dict[int, dict[str, Any]]:
     variants = row.get('variant_predictions')
     if not isinstance(variants, list):
@@ -343,12 +355,7 @@ def _variant_prediction_completed_successfully(variant: dict[str, Any] | None) -
 
 
 def _variant_prediction_should_skip_on_resume(variant: dict[str, Any] | None) -> bool:
-    if not isinstance(variant, dict):
-        return False
-    prediction_error = variant.get('prediction_error')
-    if prediction_error is None:
-        return True
-    return not str(prediction_error).startswith('request_error:')
+    return _variant_prediction_completed_successfully(variant)
 
 
 def _row_input_length_chars(row: dict[str, Any]) -> int:
@@ -606,6 +613,7 @@ def main() -> None:
                 response_text=response_text,
             )
             predicted_status, predicted_clean_text = _extract_prediction_fields(prediction_payload)
+            valid_prediction = prediction_error is None and _has_valid_prediction(prediction_payload)
             variant_predictions[prompt_variant_index] = {
                 'prompt_variant_index': prompt_variant_index,
                 'prompt_style_id': meta['prompt_style_id'],
@@ -616,7 +624,7 @@ def main() -> None:
                 'raw_response': response_text,
                 'parsed_response': prediction_payload,
                 'prediction_error': prediction_error,
-                'prediction_valid_json': prediction_error is None,
+                'valid_prediction': valid_prediction,
                 'retry_attempted': (retry_attempted or request_attempts > 1),
                 'response_usage': {},
                 'predicted_status': predicted_status,
@@ -624,8 +632,14 @@ def main() -> None:
             }
             output_rows[row_index]['variant_predictions'] = [variant_predictions[key] for key in sorted(variant_predictions)]
             output_rows[row_index]['selected_prompt_variant_indices'] = selected_prompt_variant_indices
-            if prediction_error is not None and str(prediction_error).startswith('request_error:'):
-                _write_progress_snapshot(output_path, output_dir, output_rows, model, base_url, track_name)
+            _write_progress_snapshot(output_path, output_dir, output_rows, model, base_url, track_name)
+            if prediction_error is not None and stop_message is None:
+                stop_message = (
+                    'prediction parsing failed; stopping at current sample '
+                    f'track={track_name} instance_id={instance_id or "UNKNOWN"} '
+                    f'prompt_variant_index={prompt_variant_index} '
+                    f'model={model} base_url={base_url} error={prediction_error}'
+                )
             if stop_message is not None:
                 _raise_with_snapshot(
                     output_path=output_path,
@@ -638,7 +652,6 @@ def main() -> None:
                 )
             if index % args.progress_every == 0 or index == len(variant_jobs):
                 elapsed = time.time() - started
-                _write_progress_snapshot(output_path, output_dir, output_rows, model, base_url, track_name)
                 print(f'progress infer variant={index}/{len(variant_jobs)} elapsed_sec={elapsed:.1f}', flush=True)
 
     _write_progress_snapshot(output_path, output_dir, output_rows, model, base_url, track_name)

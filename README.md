@@ -374,7 +374,8 @@ Each wrapper supports three modes:
 Behavior:
 
 - `infer` resumes from existing `predictions.jsonl`
-- when resuming, only rows whose previous result was a `request_error` are retried
+- when resuming, only rows whose previous result completed successfully are skipped
+- if any sample ends with a non-null `prediction_error`, inference stops immediately after writing the latest snapshot
 - `score` always deletes the old `score/` directory and recomputes all metrics from scratch
 
 ### API Models
