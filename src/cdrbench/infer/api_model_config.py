@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 OVERSEAS_BASE_URL = 'https://eval.dashscope.aliyuncs.com/compatible-mode/v1'
 DOMESTIC_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
-DEFAULT_COMPAT_MAX_TOKENS = 1024
+DEFAULT_COMPAT_MAX_TOKENS = 16384
 
 
 @dataclass(frozen=True)
@@ -16,6 +16,7 @@ class ApiModelConfig:
     stream: bool = True
     top_level_system: bool = False
     need_max_tokens: bool = False
+    default_max_tokens: int = DEFAULT_COMPAT_MAX_TOKENS
     aliases: tuple[str, ...] = ()
 
 
@@ -38,6 +39,7 @@ API_MODEL_CONFIGS: tuple[ApiModelConfig, ...] = (
         stream=False,
         top_level_system=True,
         need_max_tokens=True,
+        default_max_tokens=16384,
         aliases=('claude-sonnet-4-6', 'vertex_ai.claude-sonnet-4-6'),
     ),
     ApiModelConfig(
@@ -46,6 +48,7 @@ API_MODEL_CONFIGS: tuple[ApiModelConfig, ...] = (
         stream=False,
         top_level_system=True,
         need_max_tokens=True,
+        default_max_tokens=16384,
         aliases=('claude-opus-4-6', 'vertex_ai.claude-opus-4-6'),
     ),
     ApiModelConfig(
@@ -54,6 +57,7 @@ API_MODEL_CONFIGS: tuple[ApiModelConfig, ...] = (
         stream=False,
         top_level_system=True,
         need_max_tokens=True,
+        default_max_tokens=16384,
         aliases=('claude-opus-4-5-20251101', 'aws.claude-opus-4-5-20251101'),
     ),
     ApiModelConfig(

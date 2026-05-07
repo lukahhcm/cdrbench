@@ -225,8 +225,8 @@ class CompatApiInfer(BaseInfer):
 
         if self.max_tokens > 0:
             payload['max_tokens'] = self.max_tokens
-        elif self._model_config is not None and self._model_config.need_max_tokens:
-            payload['max_tokens'] = DEFAULT_COMPAT_MAX_TOKENS
+        elif self._model_config is not None and self._model_config.default_max_tokens > 0:
+            payload['max_tokens'] = self._model_config.default_max_tokens
         if self._extra_body:
             payload.update(self._extra_body)
         return payload

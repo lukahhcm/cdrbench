@@ -29,7 +29,7 @@ DEFAULT_PROMPT_CONFIG = REPO_ROOT / "configs" / "recipe_prompting.yaml"
 OVERSEAS_URL = "https://eval.dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
 DOMESTIC_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
 
-DEFAULT_MAX_TOKENS = 1024
+DEFAULT_MAX_TOKENS = 16384
 
 
 @dataclass
@@ -125,8 +125,7 @@ def build_payload(cfg: ModelConfig, prompt_bundle: dict[str, Any]) -> dict[str, 
     elif cfg.input_field == "contents":
         payload["contents"] = [{"role": "user", "parts": [{"text": combined_prompt}]}]
 
-    if cfg.need_max_tokens:
-        payload["max_tokens"] = DEFAULT_MAX_TOKENS
+    payload["max_tokens"] = DEFAULT_MAX_TOKENS
     if cfg.enable_thinking is not None:
         payload["enable_thinking"] = cfg.enable_thinking
     if cfg.thinking is not None:
