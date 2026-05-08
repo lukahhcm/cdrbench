@@ -360,12 +360,59 @@ def _execute_recipe(
     }
 
 
+def _execute_recipe_without_early_stop(
+    record: dict[str, Any],
+    sequence: list[str],
+    operators_by_name: dict[str, dict[str, Any]],
+    filter_params_by_name: dict[str, dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    filter_params_by_name = filter_params_by_name or {}
+    suffix = _infer_suffix(record)
+    text = str(record.get('text', ''))
+    trace = []
+    for step_index, op_name in enumerate(sequence):
+        kind = _op_kind(op_name, operators_by_name)
+        before_len = len(text)
+        if kind == 'mapper':
+            text, result = _apply_mapper_text(op_name, text, _base_params(op_name, operators_by_name), suffix)
+            trace.append(
+                {
+                    'step_index': step_index,
+                    'operator': op_name,
+                    'kind': kind,
+                    'input_length': before_len,
+                    **result,
+                }
+            )
+            continue
+
+        params = dict(filter_params_by_name.get(op_name, _base_params(op_name, operators_by_name)))
+        evaluation = _evaluate_filter(op_name, text, params, suffix)
+        trace.append(
+            {
+                'step_index': step_index,
+                'operator': op_name,
+                'kind': kind,
+                'input_length': before_len,
+                'keep': evaluation['keep'],
+                'status': evaluation['status'],
+                'stats': evaluation.get('stats', {}),
+            }
+        )
+
+    return {
+        'reference_text': text,
+        'trace': trace,
+    }
+
+
 def _variant_record(
     base: dict[str, Any],
     record: dict[str, Any],
     sequence: list[str],
     filter_params_by_name: dict[str, dict[str, Any]],
     execution: dict[str, Any],
+    full_run_execution: dict[str, Any] | None,
     threshold_meta: dict[str, Any] | None,
 ) -> dict[str, Any]:
     instance_id = _stable_id(_first_present(base, 'recipe_variant_id', 'workflow_variant_id'), _record_id(record))
@@ -383,6 +430,8 @@ def _variant_record(
         'reference_text': execution['reference_text'],
         'intermediate_text_at_drop': execution.get('intermediate_text_at_drop'),
         'reference_trace': execution['trace'],
+        'full_run_reference_text': None if full_run_execution is None else full_run_execution.get('reference_text'),
+        'full_run_reference_trace': None if full_run_execution is None else full_run_execution.get('trace'),
         **base,
     }
 
@@ -723,7 +772,7 @@ def _materialize_main_variant(
         for record in candidates:
             execution = _execute_recipe(record, sequence, operators_by_name)
             if execution['reference_status'] == 'KEEP' and execution['reference_text'] != str(record.get('text', '')):
-                rows.append(_variant_record(base, record, sequence, {}, execution, None))
+                rows.append(_variant_record(base, record, sequence, {}, execution, None, None))
             if len(rows) >= args.max_instances_per_variant:
                 break
         return rows, {
@@ -791,7 +840,7 @@ def _materialize_main_variant(
             execution = _execute_recipe(record, sequence, operators_by_name, filter_params_by_name)
         except Exception:
             continue
-        row = _variant_record(base, record, sequence, filter_params_by_name, execution, threshold_meta)
+        row = _variant_record(base, record, sequence, filter_params_by_name, execution, None, threshold_meta)
         if execution['reference_status'] == 'KEEP':
             keep_rows.append(row)
         else:
@@ -919,6 +968,12 @@ def _materialize_order_family(
                 variant = variants_by_slot[slot]
                 sequence = list(variant['operator_sequence'])
                 execution = _execute_recipe(record, sequence, operators_by_name, filter_params_by_name)
+                full_run_execution = _execute_recipe_without_early_stop(
+                    record,
+                    sequence,
+                    operators_by_name,
+                    filter_params_by_name,
+                )
                 signature = (execution['reference_status'], execution['reference_text'])
                 signatures.add(signature)
                 base = {
@@ -932,7 +987,17 @@ def _materialize_order_family(
                     'order_group_instance_id': _stable_id(family['order_family_id'], _record_id(record)),
                     'group_success_rule': family.get('group_success_rule', 'all_slots_correct'),
                 }
-                slot_rows.append(_variant_record(base, record, sequence, filter_params_by_name, execution, threshold_meta))
+                slot_rows.append(
+                    _variant_record(
+                        base,
+                        record,
+                        sequence,
+                        filter_params_by_name,
+                        execution,
+                        full_run_execution,
+                        threshold_meta,
+                    )
+                )
         except Exception:
             continue
         if len(signatures) < 2:
@@ -1002,7 +1067,7 @@ def main() -> None:
     parser.add_argument(
         '--resume',
         action='store_true',
-        help='Reuse per-variant cache shards in output-dir/_materialize_cache_v2 after an interrupted run.',
+        help='Reuse per-variant cache shards in output-dir/_materialize_cache_v3 after an interrupted run.',
     )
     args = parser.parse_args()
 
@@ -1010,7 +1075,7 @@ def main() -> None:
     recipe_library_dir = (root / args.recipe_library_dir).resolve()
     filtered_path = (root / args.filtered_path).resolve()
     output_dir = (root / args.output_dir).resolve()
-    cache_dir = output_dir / '_materialize_cache_v2'
+    cache_dir = output_dir / '_materialize_cache_v3'
 
     if not recipe_library_dir.exists():
         raise SystemExit(f'recipe library dir not found: {recipe_library_dir}')

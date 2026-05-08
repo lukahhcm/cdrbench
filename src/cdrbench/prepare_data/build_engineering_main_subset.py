@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 
-RECIPE_TYPES = ('clean-only', 'filter-then-clean', 'clean-then-filter')
+RECIPE_TYPES = ('clean-only', 'clean-then-filter')
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:

@@ -12,7 +12,7 @@ Default behavior:
   - read from data/benchmark_full/main
   - use selection summaries from data/processed/benchmark_instances
   - write to data/benchmark/main
-  - keep at most 1 clean-only, 1 filter-then-clean, and 1 clean-then-filter variant per recipe
+  - keep at most 1 clean-only and 1 clean-then-filter variant per recipe
   - keep up to 10 rows per retained variant
 
 Options:
