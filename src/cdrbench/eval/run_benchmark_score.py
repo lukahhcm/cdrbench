@@ -27,9 +27,18 @@ DOMAIN_METADATA = {
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     rows = []
     with path.open('r', encoding='utf-8') as handle:
-        for line in handle:
+        for line_no, line in enumerate(handle, start=1):
             if line.strip():
-                rows.append(json.loads(line))
+                try:
+                    rows.append(json.loads(line))
+                except json.JSONDecodeError as exc:
+                    preview = line.strip()
+                    if len(preview) > 200:
+                        preview = preview[:200] + '...'
+                    raise SystemExit(
+                        f'invalid JSONL in {path} at line {line_no}: {exc}. '
+                        f'Line preview: {preview}'
+                    ) from exc
     return rows
 
 
