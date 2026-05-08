@@ -51,7 +51,37 @@ bash scripts/refresh_benchmark_references.sh \
   --output-root data/benchmark_full_refreshed
 ```
 
-## 2. Rebuild the engineering `main` subset
+## 2. Attach all prompt styles to `benchmark_full` first
+
+If you want subset selection to use prompt-style availability, the current supported path is:
+
+1. refresh `benchmark_full`
+2. write `prompt_variants` onto `benchmark_full`
+3. select the engineering subset from that prompt-aware full benchmark
+
+This is required before using `--min-prompt-variants K` in the subset builders.
+
+```bash
+PYTHONPATH=src python3 -m cdrbench.prompting.build_eval_prompt_tracks \
+  --benchmark-dir data/benchmark_full \
+  --prompt-library data/processed/prompt_library/recipe_prompt_library.jsonl \
+  --output-dir data/benchmark_full \
+  --tracks atomic_ops main order_sensitivity \
+  --min-prompt-variants-per-sample 1
+```
+
+If your refreshed full benchmark is in a separate directory, use that instead:
+
+```bash
+PYTHONPATH=src python3 -m cdrbench.prompting.build_eval_prompt_tracks \
+  --benchmark-dir data/benchmark_full_refreshed \
+  --prompt-library data/processed/prompt_library/recipe_prompt_library.jsonl \
+  --output-dir data/benchmark_full_refreshed \
+  --tracks atomic_ops main order_sensitivity \
+  --min-prompt-variants-per-sample 1
+```
+
+## 3. Rebuild the engineering `main` subset
 
 Current logic keeps only:
 
@@ -90,7 +120,7 @@ bash scripts/build_engineering_main_subset.sh \
 
 When `--min-prompt-variants > 0`, the builder still uses the original `processed-summary` logic to decide which `clean-only` and `clean-then-filter` variants are preferred. The new part is that prompt-style availability is added as an eligibility filter, so the builder will skip variants whose surviving rows do not have enough `prompt_variants` and fall through to the next eligible candidate when needed.
 
-## 3. Rebuild the engineering `order_sensitivity` subset
+## 4. Rebuild the engineering `order_sensitivity` subset
 
 ```bash
 bash scripts/build_engineering_order_subset.sh \
@@ -128,7 +158,7 @@ bash scripts/build_engineering_atomic_subset.sh \
   --min-prompt-variants 5
 ```
 
-## 4. Attach all prompt styles to the selected benchmark subset
+## 5. Attach all prompt styles to the selected benchmark subset
 
 At this stage, the engineering subset in `data/benchmark` is already fixed.
 So this step should only attach all distinct prompt styles to the selected rows.
@@ -151,22 +181,21 @@ PYTHONPATH=src python3 -m cdrbench.prompting.build_eval_prompt_tracks \
   --min-prompt-variants-per-sample 1
 ```
 
-If you later decide to make prompt availability part of benchmark selection itself, the cleaner conceptual order is:
+This step is still useful even if you already attached styles to `benchmark_full`:
 
-1. attach or inspect prompt availability on `benchmark_full`
-2. select the final engineering subset from that prompt-aware full benchmark
-3. attach all styles to the final subset without further filtering
+- it rewrites the final selected subset in `data/benchmark`
+- it keeps all prompt styles available on the selected rows
+- it should not do another round of benchmark filtering
 
-The command above follows the current practical workflow: keep the subset fixed, then attach prompt styles.
+So the current recommended split is:
 
-So the recommended split is:
+- Step 2: attach styles to `benchmark_full`
+- Step 3 / Step 4: optionally enforce `--min-prompt-variants K` while selecting the subset
+- Step 5: attach styles to the final selected subset in `data/benchmark`
 
-- if you want to **fix the benchmark first**, keep `--min-prompt-variants-per-sample 1` here
-- if you want the benchmark itself to be **`@5`-ready**, enforce `--min-prompt-variants 5` during subset selection in Step 2 / Step 3 instead
+## 6. Run inference
 
-## 5. Run inference
-
-## 5.1 Run all available prompt styles for each sample
+## 6.1 Run all available prompt styles for each sample
 
 Example:
 
@@ -180,7 +209,7 @@ Default predictions filename:
 
 - `predictions_direct.jsonl`
 
-## 5.2 Run a deterministic sampled style subset at infer time
+## 6.2 Run a deterministic sampled style subset at infer time
 
 This is useful when you do **not** want to pay for full-style inference.
 For example, you can first try GPT with a deterministic 3-style subset for one seed.
@@ -224,7 +253,7 @@ bash scripts/eval/api/eval_gpt_5_4.sh infer \
   --prompt-variant-sampling-seed 0
 ```
 
-## 5.3 Score from a full-style predictions file without re-inference
+## 6.3 Score from a full-style predictions file without re-inference
 
 If you already ran full-style inference once, you can compute `@k` offline from the saved full predictions.
 This avoids re-running inference for `@2`, `@3`, `@4`, etc.
@@ -267,7 +296,7 @@ Default score directory:
 
 This score-time sampling is deterministic and does **not** re-run inference.
 
-## 5.4 Run a deterministic sampled `@3` directly at infer time
+## 6.4 Run a deterministic sampled `@3` directly at infer time
 
 This is the cheapest way to quickly test a model before deciding whether to run full-style inference.
 
@@ -279,7 +308,7 @@ PROMPT_VARIANT_SAMPLING_SEED=0 \
 bash scripts/eval/api/eval_gpt_5_4.sh infer --mode direct
 ```
 
-## 5.5 Run prompt baselines
+## 6.5 Run prompt baselines
 
 Examples:
 
@@ -306,12 +335,19 @@ and matching score directories:
 
 If infer-time sampling is enabled, filenames and score directories also include `_k{K}_seed{S}` automatically.
 
-## 6. Recommended minimal run order
+## 7. Recommended minimal run order
 
 If you just want the shortest safe path:
 
 ```bash
 bash scripts/refresh_benchmark_references.sh
+
+PYTHONPATH=src python3 -m cdrbench.prompting.build_eval_prompt_tracks \
+  --benchmark-dir data/benchmark_full \
+  --prompt-library data/processed/prompt_library/recipe_prompt_library.jsonl \
+  --output-dir data/benchmark_full \
+  --tracks atomic_ops main order_sensitivity \
+  --min-prompt-variants-per-sample 1
 
 bash scripts/build_engineering_main_subset.sh \
   --source-dir data/benchmark_full/main \
@@ -343,7 +379,7 @@ bash scripts/build_engineering_atomic_subset.sh \
   --min-prompt-variants 5
 ```
 
-If you also want prompt-track rebuild on the already selected subset:
+Then attach styles to the final selected subset:
 
 ```bash
 PYTHONPATH=src python3 -m cdrbench.prompting.build_eval_prompt_tracks \
@@ -386,6 +422,6 @@ bash scripts/eval/api/eval_gpt_5_4.sh score --mode direct
 - `reference_text_full_run` is the extra full-run reference used for `order_sensitivity` analysis.
 - Old fields such as `intermediate_text_at_drop` are removed during refresh.
 - `build_eval_prompt_tracks` now stores all distinct prompt styles per sample.
-- The current recommended prompt-track rebuild attaches styles to the already selected subset in `data/benchmark`; it does not intentionally re-filter the subset by prompt count.
-- If you care about `@5`, prefer enforcing `--min-prompt-variants 5` during subset selection from `benchmark_full`, rather than trying to enforce it later at prompt-attach time.
+- If you care about `@5`, first attach styles to `benchmark_full`, then enforce `--min-prompt-variants 5` during subset selection from that prompt-aware full benchmark.
+- The final prompt-track rebuild on `data/benchmark` is for carrying all styles into the selected subset, not for another round of benchmark filtering.
 - Infer-time sampling and score-time `@k` sampling are deterministic and seed-controlled.
