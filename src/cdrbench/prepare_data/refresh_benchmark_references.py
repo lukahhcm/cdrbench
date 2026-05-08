@@ -95,6 +95,15 @@ def _resolve_sequence_and_filter_params(
     if sequence:
         return sequence, filter_params_by_name, None
 
+    benchmark_track = str(row.get('benchmark_track') or '').strip()
+    if benchmark_track == 'atomic' or benchmark_track == 'atomic_ops':
+        operator = str(row.get('operator') or '').strip()
+        if not operator:
+            raise RuntimeError(
+                f'missing operator_sequence and operator for atomic instance_id={row.get("instance_id")}'
+            )
+        return [operator], filter_params_by_name, None
+
     variant_id = str(row.get('recipe_variant_id') or '').strip()
     variant = recipe_variant_index.get(variant_id)
     if variant is None:
