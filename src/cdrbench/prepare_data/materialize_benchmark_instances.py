@@ -348,14 +348,12 @@ def _execute_recipe(
             return {
                 'reference_status': 'DROP',
                 'reference_text': text,
-                'intermediate_text_at_drop': text,
                 'trace': trace,
             }
 
     return {
         'reference_status': 'KEEP',
         'reference_text': text,
-        'intermediate_text_at_drop': None,
         'trace': trace,
     }
 
@@ -428,9 +426,8 @@ def _variant_record(
         'threshold_meta': threshold_meta or {},
         'reference_status': execution['reference_status'],
         'reference_text': execution['reference_text'],
-        'intermediate_text_at_drop': execution.get('intermediate_text_at_drop'),
         'reference_trace': execution['trace'],
-        'full_run_reference_text': None if full_run_execution is None else full_run_execution.get('reference_text'),
+        'reference_text_full_run': None if full_run_execution is None else full_run_execution.get('reference_text'),
         'full_run_reference_trace': None if full_run_execution is None else full_run_execution.get('trace'),
         **base,
     }
@@ -533,7 +530,6 @@ def _atomic_record(
         'threshold_meta': threshold_meta or {},
         'reference_status': execution['reference_status'],
         'reference_text': execution['reference_text'],
-        'intermediate_text_at_drop': execution.get('intermediate_text_at_drop'),
         'reference_trace': execution['trace'],
     }
 
