@@ -14,6 +14,7 @@ Options:
   --output-root <path>      Optional alternate output root. Default: overwrite benchmark-root
   --tracks <csv>            Comma-separated tracks. Default: atomic_ops,main,order_sensitivity
   --domains-config <path>   Domains config YAML. Default: configs/domains.yaml
+  --recipe-library-dir <path>  Recipe library root for backfilling missing operator sequences. Default: data/processed/recipe_library
   -h, --help                Show this help
 EOF
 }
@@ -31,6 +32,7 @@ BENCHMARK_ROOT="data/benchmark_full"
 OUTPUT_ROOT=""
 TRACKS="atomic_ops,main,order_sensitivity"
 DOMAINS_CONFIG="configs/domains.yaml"
+RECIPE_LIBRARY_DIR="data/processed/recipe_library"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -48,6 +50,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --domains-config)
       DOMAINS_CONFIG="$2"
+      shift 2
+      ;;
+    --recipe-library-dir)
+      RECIPE_LIBRARY_DIR="$2"
       shift 2
       ;;
     -h|--help)
@@ -69,6 +75,7 @@ cmd=(
   --benchmark-root "$BENCHMARK_ROOT"
   --tracks "$TRACKS"
   --domains-config "$DOMAINS_CONFIG"
+  --recipe-library-dir "$RECIPE_LIBRARY_DIR"
 )
 if [[ -n "$OUTPUT_ROOT" ]]; then
   cmd+=(--output-root "$OUTPUT_ROOT")

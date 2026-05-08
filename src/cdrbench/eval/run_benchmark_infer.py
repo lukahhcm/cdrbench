@@ -236,6 +236,30 @@ def _parse_prompt_variant_indices(value: str | None, row: dict[str, Any]) -> lis
     return sorted(set(requested))
 
 
+def _sample_prompt_variant_indices(
+    row: dict[str, Any],
+    *,
+    sample_size: int,
+    sample_seed: int,
+) -> list[int]:
+    available = _available_prompt_variant_indices(row)
+    if sample_size <= 0 or sample_size >= len(available):
+        return available
+    recipe_prompt_key = str(_first_present(row, 'recipe_prompt_key', 'workflow_prompt_key') or '')
+    instance_id = str(row.get('instance_id') or '')
+    ranked = sorted(
+        available,
+        key=lambda index: _stable_id(
+            'prompt-variant-sample',
+            sample_seed,
+            recipe_prompt_key,
+            instance_id,
+            index,
+        ),
+    )
+    return sorted(ranked[:sample_size])
+
+
 def _select_prompt_variant(row: dict[str, Any], prompt_variant_index: int) -> dict[str, Any]:
     prompt_variants = row.get('prompt_variants')
     if isinstance(prompt_variants, list) and prompt_variants:
@@ -750,6 +774,8 @@ def main() -> None:
     parser.add_argument('--max-tokens', type=int, default=0)
     parser.add_argument('--prompt-variant-index', type=int, default=0)
     parser.add_argument('--prompt-variant-indices', default=None)
+    parser.add_argument('--prompt-variant-sample-size', type=int, default=0)
+    parser.add_argument('--prompt-variant-sampling-seed', type=int, default=0)
     parser.add_argument('--prompt-mode', choices=PROMPT_MODES, default='direct')
     parser.add_argument('--few-shot-source-root', default=str(DEFAULT_FEW_SHOT_SOURCE_ROOT))
     parser.add_argument('--max-samples', type=int, default=0)
@@ -806,10 +832,22 @@ def main() -> None:
     started = time.time()
     for row_index, row in enumerate(rows):
         instance_id = str(row.get('instance_id') or '')
-        selected_prompt_variant_indices = _parse_prompt_variant_indices(
-            args.prompt_variant_indices if args.prompt_variant_indices is not None else str(args.prompt_variant_index),
-            row,
-        )
+        if args.prompt_variant_sample_size > 0:
+            if args.prompt_variant_indices not in (None, '', 'all') or args.prompt_variant_index != 0:
+                raise SystemExit(
+                    'Do not combine --prompt-variant-sample-size with explicit prompt variant index selection. '
+                    'Use either sampling or --prompt-variant-indices/--prompt-variant-index.'
+                )
+            selected_prompt_variant_indices = _sample_prompt_variant_indices(
+                row,
+                sample_size=args.prompt_variant_sample_size,
+                sample_seed=args.prompt_variant_sampling_seed,
+            )
+        else:
+            selected_prompt_variant_indices = _parse_prompt_variant_indices(
+                args.prompt_variant_indices if args.prompt_variant_indices is not None else str(args.prompt_variant_index),
+                row,
+            )
         existing_variant_predictions = _existing_variant_prediction_map(existing_rows_by_id.get(instance_id, {}))
         variant_predictions = dict(existing_variant_predictions)
         for prompt_variant_index in selected_prompt_variant_indices:

@@ -67,13 +67,8 @@ def _recipe_key(row: dict[str, Any]) -> str:
     )
 
 
-def _sample_prompt_variants(
+def _all_distinct_prompt_variants(
     candidates: list[dict[str, Any]],
-    *,
-    recipe_prompt_key: str,
-    instance_id: str,
-    sample_count: int,
-    sample_seed: int,
 ) -> list[dict[str, Any]]:
     candidates_by_style: dict[str, list[dict[str, Any]]] = {}
     for candidate in candidates:
@@ -82,26 +77,12 @@ def _sample_prompt_variants(
             continue
         candidates_by_style.setdefault(style_id, []).append(candidate)
 
-    sampled_style_ids = sorted(
-        candidates_by_style,
-        key=lambda style_id: _stable_id(
-            'prompt-style-sample',
-            sample_seed,
-            recipe_prompt_key,
-            instance_id,
-            style_id,
-        ),
-    )[:sample_count]
-
     prompt_variants = []
-    for style_id in sampled_style_ids:
+    for style_id in sorted(candidates_by_style):
         style_candidates = sorted(
             candidates_by_style[style_id],
             key=lambda candidate: _stable_id(
-                'prompt-candidate-sample',
-                sample_seed,
-                recipe_prompt_key,
-                instance_id,
+                'prompt-candidate-canonical',
                 style_id,
                 candidate.get('candidate_id') or candidate.get('user_requirement') or '',
             ),
@@ -122,16 +103,8 @@ def _eval_row(
     *,
     recipe_prompt_key: str,
     candidates: list[dict[str, Any]],
-    prompt_variants_per_sample: int,
-    prompt_sampling_seed: int,
 ) -> dict[str, Any]:
-    prompt_variants = _sample_prompt_variants(
-        candidates,
-        recipe_prompt_key=recipe_prompt_key,
-        instance_id=str(row.get('instance_id') or ''),
-        sample_count=prompt_variants_per_sample,
-        sample_seed=prompt_sampling_seed,
-    )
+    prompt_variants = _all_distinct_prompt_variants(candidates)
     keep_fields = [
         'instance_id',
         'benchmark_track',
@@ -164,8 +137,8 @@ def _eval_row(
             'recipe_prompt_key': recipe_prompt_key,
             'prompt_candidate_pool_count': len(candidates),
             'prompt_variant_count': len(prompt_variants),
-            'prompt_sampling_policy': 'deterministic_distinct_styles_without_replacement',
-            'prompt_sampling_seed': prompt_sampling_seed,
+            'prompt_sampling_policy': 'store_all_distinct_styles',
+            'prompt_sampling_seed': None,
             'prompt_variants': prompt_variants,
         }
     )
@@ -241,8 +214,6 @@ def main() -> None:
                     row,
                     recipe_prompt_key=recipe_prompt_key,
                     candidates=candidates,
-                    prompt_variants_per_sample=args.prompt_variants_per_sample,
-                    prompt_sampling_seed=args.prompt_sampling_seed,
                 )
             )
             if row_index % EVAL_PROGRESS_EVERY == 0 or row_index == total_rows:

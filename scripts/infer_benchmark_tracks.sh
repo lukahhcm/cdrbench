@@ -24,6 +24,8 @@ Options:
   --base-url <url>                     OpenAI-compatible API base URL
   --api-key <key>                      API key. For local vLLM you can use EMPTY
   --prompt-variant-indices <spec>      Comma-separated indices or all. Default: all
+  --prompt-variant-sample-size <int>   Deterministically sample this many prompt styles per row at infer time. Default: 0 (disabled)
+  --prompt-variant-sampling-seed <int> Deterministic sampling seed used with --prompt-variant-sample-size. Default: 0
   --prompt-mode <mode>                 Prompt construction mode. Default: direct
   --few-shot-source-root <path>        Full benchmark root for few-shot examples. Default: data/benchmark_full
   --max-samples <int>                  Optional cap for smoke tests. Default: 0 (all)
@@ -69,6 +71,8 @@ MODEL=""
 BASE_URL=""
 API_KEY=""
 PROMPT_VARIANT_INDICES="all"
+PROMPT_VARIANT_SAMPLE_SIZE="0"
+PROMPT_VARIANT_SAMPLING_SEED="0"
 PROMPT_MODE="direct"
 FEW_SHOT_SOURCE_ROOT="data/benchmark_full"
 MAX_SAMPLES="0"
@@ -112,6 +116,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --prompt-variant-indices)
       PROMPT_VARIANT_INDICES="$2"
+      shift 2
+      ;;
+    --prompt-variant-sample-size)
+      PROMPT_VARIANT_SAMPLE_SIZE="$2"
+      shift 2
+      ;;
+    --prompt-variant-sampling-seed)
+      PROMPT_VARIANT_SAMPLING_SEED="$2"
       shift 2
       ;;
     --prompt-mode)
@@ -211,6 +223,8 @@ for track in "${TRACKS[@]}"; do
     --output-path "$output_dir/$PREDICTIONS_FILENAME"
     --model "$MODEL"
     --prompt-variant-indices "$PROMPT_VARIANT_INDICES"
+    --prompt-variant-sample-size "$PROMPT_VARIANT_SAMPLE_SIZE"
+    --prompt-variant-sampling-seed "$PROMPT_VARIANT_SAMPLING_SEED"
     --prompt-mode "$PROMPT_MODE"
     --few-shot-source-root "$FEW_SHOT_SOURCE_ROOT"
     --max-samples "$MAX_SAMPLES"
