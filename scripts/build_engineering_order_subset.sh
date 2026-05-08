@@ -12,7 +12,7 @@ Default behavior:
   - read from data/benchmark_full/order_sensitivity
   - use selection summaries from data/processed/benchmark_instances
   - write to data/benchmark/order_sensitivity
-  - keep the strongest 1 order family per recipe
+  - keep up to 5 order families per recipe
   - keep up to 5 full groups per retained family
   - each retained group keeps front/middle/end together
 
@@ -20,7 +20,8 @@ Options:
   --source-dir <path>                Full order-sensitivity benchmark directory. Default: data/benchmark_full/order_sensitivity
   --processed-summary-dir <path>     Benchmark-instance summary directory. Default: data/processed/benchmark_instances
   --output-dir <path>                Output subset directory. Default: data/benchmark/order_sensitivity
-  --groups-per-family <int>          Max groups kept per retained family. Default: 5
+  --families-per-recipe <int>        Max families kept per recipe. Default: 5. Use 0 for no limit.
+  --groups-per-family <int>          Max groups kept per retained family. Default: 5. Use 0 for no limit.
   --min-prompt-variants <int>        Require at least this many prompt variants per row; when > 0, selection is driven directly from benchmark_full rows
   -h, --help                         Show this help
 EOF
@@ -39,6 +40,7 @@ SOURCE_DIR="data/benchmark_full/order_sensitivity"
 PROCESSED_SUMMARY_DIR="data/processed/benchmark_instances"
 OUTPUT_DIR="data/benchmark/order_sensitivity"
 GROUPS_PER_FAMILY="5"
+FAMILIES_PER_RECIPE="5"
 MIN_PROMPT_VARIANTS="0"
 
 while [[ $# -gt 0 ]]; do
@@ -57,6 +59,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --groups-per-family)
       GROUPS_PER_FAMILY="$2"
+      shift 2
+      ;;
+    --families-per-recipe)
+      FAMILIES_PER_RECIPE="$2"
       shift 2
       ;;
     --min-prompt-variants)
@@ -81,5 +87,6 @@ export PYTHONPATH="$REPO_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
   --source-dir "$SOURCE_DIR" \
   --processed-summary-dir "$PROCESSED_SUMMARY_DIR" \
   --output-dir "$OUTPUT_DIR" \
+  --families-per-recipe "$FAMILIES_PER_RECIPE" \
   --groups-per-family "$GROUPS_PER_FAMILY" \
   --min-prompt-variants "$MIN_PROMPT_VARIANTS"

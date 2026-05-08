@@ -137,6 +137,14 @@ def _normalize_group_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]] | 
 
 
 def _select_best_families(summary_rows: list[dict[str, str]]) -> tuple[dict[str, dict[str, str]], list[dict[str, Any]]]:
+    return _select_top_families(summary_rows, families_per_recipe=1)
+
+
+def _select_top_families(
+    summary_rows: list[dict[str, str]],
+    *,
+    families_per_recipe: int,
+) -> tuple[dict[str, dict[str, str]], list[dict[str, Any]]]:
     kept_rows = [row for row in summary_rows if str(row.get('status') or '').strip() == 'kept']
     by_recipe: dict[str, list[dict[str, str]]] = defaultdict(list)
     for row in kept_rows:
@@ -148,23 +156,27 @@ def _select_best_families(summary_rows: list[dict[str, str]]) -> tuple[dict[str,
     selected_families: dict[str, dict[str, str]] = {}
     manifest_rows: list[dict[str, Any]] = []
     for recipe_id in sorted(by_recipe):
-        best = max(by_recipe[recipe_id], key=_family_rank_key)
-        family_id = str(best['order_family_id'])
-        selected_families[family_id] = best
-        manifest_rows.append(
-            {
-                'recipe_id': recipe_id,
-                'order_family_id': family_id,
-                'filter_name': best.get('filter_name'),
-                'candidate_count': _to_int(best.get('candidate_count')),
-                'usable_record_count': _to_int(best.get('usable_record_count')),
-                'value_count': _to_int(best.get('value_count')),
-                'full_selected_group_count': _to_int(best.get('selected_group_count')),
-                'full_selected_variant_count': _to_int(best.get('selected_variant_count')),
-                'keep_count': _to_int(best.get('keep_count')),
-                'drop_count': _to_int(best.get('drop_count')),
-            }
-        )
+        ranked = sorted(by_recipe[recipe_id], key=_family_rank_key, reverse=True)
+        if families_per_recipe > 0:
+            ranked = ranked[:families_per_recipe]
+        for family_rank, best in enumerate(ranked, start=1):
+            family_id = str(best['order_family_id'])
+            selected_families[family_id] = best
+            manifest_rows.append(
+                {
+                    'recipe_id': recipe_id,
+                    'order_family_id': family_id,
+                    'family_rank_within_recipe': family_rank,
+                    'filter_name': best.get('filter_name'),
+                    'candidate_count': _to_int(best.get('candidate_count')),
+                    'usable_record_count': _to_int(best.get('usable_record_count')),
+                    'value_count': _to_int(best.get('value_count')),
+                    'full_selected_group_count': _to_int(best.get('selected_group_count')),
+                    'full_selected_variant_count': _to_int(best.get('selected_variant_count')),
+                    'keep_count': _to_int(best.get('keep_count')),
+                    'drop_count': _to_int(best.get('drop_count')),
+                }
+            )
     return selected_families, manifest_rows
 
 
@@ -172,6 +184,21 @@ def _select_best_families_with_eligible_rows(
     summary_rows: list[dict[str, str]],
     eligible_group_counts_by_family_id: dict[str, int],
     eligible_variant_counts_by_family_id: dict[str, int],
+) -> tuple[dict[str, dict[str, str]], list[dict[str, Any]]]:
+    return _select_top_families_with_eligible_rows(
+        summary_rows,
+        eligible_group_counts_by_family_id,
+        eligible_variant_counts_by_family_id,
+        families_per_recipe=1,
+    )
+
+
+def _select_top_families_with_eligible_rows(
+    summary_rows: list[dict[str, str]],
+    eligible_group_counts_by_family_id: dict[str, int],
+    eligible_variant_counts_by_family_id: dict[str, int],
+    *,
+    families_per_recipe: int,
 ) -> tuple[dict[str, dict[str, str]], list[dict[str, Any]]]:
     kept_rows = [row for row in summary_rows if str(row.get('status') or '').strip() == 'kept']
     by_recipe: dict[str, list[dict[str, str]]] = defaultdict(list)
@@ -187,25 +214,29 @@ def _select_best_families_with_eligible_rows(
     selected_families: dict[str, dict[str, str]] = {}
     manifest_rows: list[dict[str, Any]] = []
     for recipe_id in sorted(by_recipe):
-        best = max(by_recipe[recipe_id], key=_family_rank_key)
-        family_id = str(best['order_family_id'])
-        selected_families[family_id] = best
-        manifest_rows.append(
-            {
-                'recipe_id': recipe_id,
-                'order_family_id': family_id,
-                'filter_name': best.get('filter_name'),
-                'candidate_count': _to_int(best.get('candidate_count')),
-                'usable_record_count': _to_int(best.get('usable_record_count')),
-                'value_count': _to_int(best.get('value_count')),
-                'full_selected_group_count': _to_int(best.get('selected_group_count')),
-                'full_selected_variant_count': _to_int(best.get('selected_variant_count')),
-                'keep_count': _to_int(best.get('keep_count')),
-                'drop_count': _to_int(best.get('drop_count')),
-                'eligible_prompt_group_count': eligible_group_counts_by_family_id.get(family_id, 0),
-                'eligible_prompt_variant_count': eligible_variant_counts_by_family_id.get(family_id, 0),
-            }
-        )
+        ranked = sorted(by_recipe[recipe_id], key=_family_rank_key, reverse=True)
+        if families_per_recipe > 0:
+            ranked = ranked[:families_per_recipe]
+        for family_rank, best in enumerate(ranked, start=1):
+            family_id = str(best['order_family_id'])
+            selected_families[family_id] = best
+            manifest_rows.append(
+                {
+                    'recipe_id': recipe_id,
+                    'order_family_id': family_id,
+                    'family_rank_within_recipe': family_rank,
+                    'filter_name': best.get('filter_name'),
+                    'candidate_count': _to_int(best.get('candidate_count')),
+                    'usable_record_count': _to_int(best.get('usable_record_count')),
+                    'value_count': _to_int(best.get('value_count')),
+                    'full_selected_group_count': _to_int(best.get('selected_group_count')),
+                    'full_selected_variant_count': _to_int(best.get('selected_variant_count')),
+                    'keep_count': _to_int(best.get('keep_count')),
+                    'drop_count': _to_int(best.get('drop_count')),
+                    'eligible_prompt_group_count': eligible_group_counts_by_family_id.get(family_id, 0),
+                    'eligible_prompt_variant_count': eligible_variant_counts_by_family_id.get(family_id, 0),
+                }
+            )
     return selected_families, manifest_rows
 
 
@@ -239,6 +270,14 @@ def _build_eligible_group_rows_by_family(
 
 
 def _select_best_families_from_rows(full_rows: list[dict[str, Any]]) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]]:
+    return _select_top_families_from_rows(full_rows, families_per_recipe=1)
+
+
+def _select_top_families_from_rows(
+    full_rows: list[dict[str, Any]],
+    *,
+    families_per_recipe: int,
+) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]]:
     group_rows_by_family: dict[str, dict[str, list[dict[str, Any]]]] = defaultdict(lambda: defaultdict(list))
     family_meta_by_id: dict[str, dict[str, Any]] = {}
     for row in full_rows:
@@ -277,17 +316,26 @@ def _select_best_families_from_rows(full_rows: list[dict[str, Any]]) -> tuple[di
     selected_families: dict[str, dict[str, Any]] = {}
     manifest_rows: list[dict[str, Any]] = []
     for recipe_id in sorted(by_recipe):
-        best = max(
+        ranked = sorted(
             by_recipe[recipe_id],
             key=lambda row: (
                 _to_int(row.get('full_selected_group_count')),
                 _to_int(row.get('full_selected_variant_count')),
                 str(row.get('order_family_id') or ''),
             ),
+            reverse=True,
         )
-        family_id = str(best['order_family_id'])
-        selected_families[family_id] = best
-        manifest_rows.append(best)
+        if families_per_recipe > 0:
+            ranked = ranked[:families_per_recipe]
+        for family_rank, best in enumerate(ranked, start=1):
+            family_id = str(best['order_family_id'])
+            selected_families[family_id] = best
+            manifest_rows.append(
+                {
+                    **best,
+                    'family_rank_within_recipe': family_rank,
+                }
+            )
     return selected_families, manifest_rows
 
 
@@ -299,14 +347,17 @@ def main() -> None:
     parser.add_argument('--output-dir', default='data/benchmark/order_sensitivity')
     parser.add_argument('--processed-summary-dir', default='data/processed/benchmark_instances')
     parser.add_argument('--groups-per-family', type=int, default=5)
+    parser.add_argument('--families-per-recipe', type=int, default=5)
     parser.add_argument('--min-prompt-variants', type=int, default=0)
     args = parser.parse_args()
 
     source_dir = Path(args.source_dir).resolve()
     output_dir = Path(args.output_dir).resolve()
     processed_summary_dir = Path(args.processed_summary_dir).resolve()
-    if args.groups_per_family <= 0:
-        raise SystemExit('--groups-per-family must be > 0')
+    if args.groups_per_family < 0:
+        raise SystemExit('--groups-per-family must be >= 0')
+    if args.families_per_recipe < 0:
+        raise SystemExit('--families-per-recipe must be >= 0')
     if args.min_prompt_variants < 0:
         raise SystemExit('--min-prompt-variants must be >= 0')
 
@@ -342,18 +393,28 @@ def main() -> None:
             eligible_variant_counts_by_family_id,
         ) = _build_eligible_group_rows_by_family(full_rows)
         summary_rows = _read_table(summary_path)
-        selected_families_by_id, manifest_rows = _select_best_families_with_eligible_rows(
+        selected_families_by_id, manifest_rows = _select_top_families_with_eligible_rows(
             summary_rows,
             eligible_group_counts_by_family_id,
             eligible_variant_counts_by_family_id,
+            families_per_recipe=args.families_per_recipe,
         )
         if not selected_families_by_id:
-            selected_families_by_id, manifest_rows = _select_best_families_from_rows(full_rows)
+            selected_families_by_id, manifest_rows = _select_top_families_from_rows(
+                full_rows,
+                families_per_recipe=args.families_per_recipe,
+            )
     else:
         summary_rows = _read_table(summary_path)
-        selected_families_by_id, manifest_rows = _select_best_families(summary_rows)
+        selected_families_by_id, manifest_rows = _select_top_families(
+            summary_rows,
+            families_per_recipe=args.families_per_recipe,
+        )
         if not selected_families_by_id:
-            selected_families_by_id, manifest_rows = _select_best_families_from_rows(full_rows)
+            selected_families_by_id, manifest_rows = _select_top_families_from_rows(
+                full_rows,
+                families_per_recipe=args.families_per_recipe,
+            )
     if not selected_families_by_id:
         raise SystemExit(f'no usable order families found in {benchmark_path} or {summary_path}')
 
@@ -379,7 +440,7 @@ def main() -> None:
             if normalized is not None:
                 normalized_groups.append((group_id, normalized))
         normalized_groups.sort(key=lambda item: _group_sort_key(item[1]))
-        selected_groups = normalized_groups[: args.groups_per_family]
+        selected_groups = normalized_groups if args.groups_per_family == 0 else normalized_groups[: args.groups_per_family]
         family_subset_rows = [row for _, rows in selected_groups for row in rows]
         if args.min_prompt_variants > 0 and not selected_groups:
             continue
