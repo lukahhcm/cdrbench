@@ -5,6 +5,9 @@ from typing import Any
 
 import editdistance
 
+STOP_AWARE_RG_LAMBDA = 1.0
+STOP_AWARE_RG_EPSILON = 1e-6
+
 
 def normalize_status(value: Any) -> str:
     text = '' if value is None else str(value)
@@ -38,11 +41,13 @@ def compute_recipe_metrics(
     input_text: Any,
     reference_status: Any,
     reference_text: Any,
+    reference_text_full_run: Any = None,
     predicted_status: Any,
     predicted_clean_text: Any,
 ) -> dict[str, Any]:
     raw_input = '' if input_text is None else str(input_text)
     raw_reference = '' if reference_text is None else str(reference_text)
+    raw_reference_full_run = '' if reference_text_full_run is None else str(reference_text_full_run)
     raw_prediction = '' if predicted_clean_text is None else str(predicted_clean_text)
 
     normalized_reference_status = normalize_status(reference_status)
@@ -61,12 +66,15 @@ def compute_recipe_metrics(
     norm_recipe_success = status_match and norm_text_exact_match
 
     d_input = edit_distance(raw_input, raw_reference)
-    d_pred = edit_distance(raw_prediction, raw_reference)
-    distance_total = d_input + d_pred
-    if distance_total == 0:
-        refinement_gain = 1.0
+    d_pred_stop = edit_distance(raw_prediction, raw_reference)
+    denominator = d_input + d_pred_stop + STOP_AWARE_RG_EPSILON
+    drop_penalty = 0.0
+    if normalized_reference_status == 'DROP' and raw_reference_full_run:
+        d_pred_full = edit_distance(raw_prediction, raw_reference_full_run)
+        drop_penalty = STOP_AWARE_RG_LAMBDA * float(d_pred_stop - d_pred_full)
     else:
-        refinement_gain = (d_input - d_pred) / distance_total
+        d_pred_full = None
+    refinement_gain = (float(d_input - d_pred_stop) - drop_penalty) / denominator
 
     return {
         'normalized_reference_status': normalized_reference_status,
@@ -84,6 +92,10 @@ def compute_recipe_metrics(
         'norm_recipe_success': norm_recipe_success,
         'text_match': text_exact_match,
         'edit_distance_input_to_reference': d_input,
-        'edit_distance_prediction_to_reference': d_pred,
+        'edit_distance_prediction_to_reference': d_pred_stop,
+        'edit_distance_prediction_to_full_run_reference': d_pred_full,
+        'reference_text_full_run': raw_reference_full_run,
+        'stop_aware_rg_lambda': STOP_AWARE_RG_LAMBDA,
+        'stop_aware_rg_epsilon': STOP_AWARE_RG_EPSILON,
         'refinement_gain': refinement_gain,
     }

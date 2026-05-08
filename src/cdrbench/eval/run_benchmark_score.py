@@ -233,6 +233,7 @@ def _base_identity(row: dict[str, Any]) -> dict[str, Any]:
         'input_length_bucket',
         'reference_status',
         'reference_text',
+        'reference_text_full_run',
         'recipe_id',
         'recipe_variant_id',
         'recipe_type',
@@ -264,6 +265,7 @@ def _score_variant(prediction_row: dict[str, Any], variant_prediction: dict[str,
                 input_text=prediction_row.get('input_text', ''),
                 reference_status=prediction_row.get('reference_status', ''),
                 reference_text=prediction_row.get('reference_text', ''),
+                reference_text_full_run=prediction_row.get('reference_text_full_run', ''),
                 predicted_status=predicted_status,
                 predicted_clean_text=predicted_clean_text,
             )
@@ -287,6 +289,10 @@ def _score_variant(prediction_row: dict[str, Any], variant_prediction: dict[str,
                 'text_match': False,
                 'edit_distance_input_to_reference': None,
                 'edit_distance_prediction_to_reference': None,
+                'edit_distance_prediction_to_full_run_reference': None,
+                'reference_text_full_run': '' if prediction_row.get('reference_text_full_run') is None else str(prediction_row.get('reference_text_full_run')),
+                'stop_aware_rg_lambda': None,
+                'stop_aware_rg_epsilon': None,
                 'refinement_gain': None,
             }
         )
@@ -529,6 +535,9 @@ def _summary_report_text(summary: dict[str, Any]) -> str:
         parts.append(f"ocs_at_k={float(summary.get('ocs_at_k', 0.0)):.4f}")
         parts.append(f"ocs_strict={float(summary.get('ocs_strict', 0.0)):.4f}")
         parts.append(f"ocs_at_k_strict={float(summary.get('ocs_at_k_strict', 0.0)):.4f}")
+    for key in ('rs_front', 'rs_front@k', 'rs_middle', 'rs_middle@k', 'rs_end', 'rs_end@k'):
+        if key in summary:
+            parts.append(f"{key}={float(summary.get(key, 0.0)):.4f}")
     return ' '.join(parts)
 
 
@@ -552,7 +561,18 @@ def _paper_metrics_payload(summary: dict[str, Any]) -> dict[str, Any]:
     if int(summary.get('prompt_variant_sample_size', 0) or 0) == 3:
         payload['mean_rs@3'] = summary.get('mean_rs@k')
         payload['mean_rs_strict@3'] = summary.get('mean_rs_strict@k')
-    for key in ('ocs', 'ocs_at_k', 'ocs_strict', 'ocs_at_k_strict', 'rs_front', 'rs_middle', 'rs_end'):
+    for key in (
+        'ocs',
+        'ocs_at_k',
+        'ocs_strict',
+        'ocs_at_k_strict',
+        'rs_front',
+        'rs_front@k',
+        'rs_middle',
+        'rs_middle@k',
+        'rs_end',
+        'rs_end@k',
+    ):
         if key in summary:
             payload[key] = summary.get(key)
     return payload
@@ -605,8 +625,11 @@ def _build_summary(
         summary['ocs_strict'] = _rate_optional(order_group_rows, 'ocs_strict')
         summary['ocs_at_k_strict'] = _rate_optional(order_group_rows, 'ocs_at_k_strict')
         summary['rs_front'] = _safe_mean([float(row.get('mean_rs', 0.0)) for row in instance_rows if str(row.get('order_slot') or '') == 'front'])
+        summary['rs_front@k'] = _rate_optional([row for row in instance_rows if str(row.get('order_slot') or '') == 'front'], 'mean_rs@k')
         summary['rs_middle'] = _safe_mean([float(row.get('mean_rs', 0.0)) for row in instance_rows if str(row.get('order_slot') or '') == 'middle'])
+        summary['rs_middle@k'] = _rate_optional([row for row in instance_rows if str(row.get('order_slot') or '') == 'middle'], 'mean_rs@k')
         summary['rs_end'] = _safe_mean([float(row.get('mean_rs', 0.0)) for row in instance_rows if str(row.get('order_slot') or '') == 'end'])
+        summary['rs_end@k'] = _rate_optional([row for row in instance_rows if str(row.get('order_slot') or '') == 'end'], 'mean_rs@k')
         summary['num_order_groups'] = len(order_group_rows)
     return summary
 

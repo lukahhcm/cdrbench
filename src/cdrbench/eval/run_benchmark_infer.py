@@ -194,6 +194,7 @@ def _base_inference_row(eval_row: dict[str, Any]) -> dict[str, Any]:
         'input_length_bucket',
         'reference_status',
         'reference_text',
+        'reference_text_full_run',
         'prompt_variant_count',
         'prompt_candidate_pool_count',
         'prompt_sampling_policy',
