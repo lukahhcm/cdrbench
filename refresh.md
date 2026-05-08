@@ -190,6 +190,36 @@ PYTHONPATH=src python3 -m cdrbench.prompting.build_eval_prompt_tracks \
   --min-prompt-variants-per-sample 1
 ```
 
+## 5.5 Refresh the final selected subset after subset building
+
+If you want the final selected subset itself to carry refreshed deterministic references,
+including `reference_text_full_run` for `order_sensitivity`, refresh `data/benchmark`
+directly after subset selection.
+
+Safe version writing to a new directory:
+
+```bash
+bash scripts/refresh_benchmark_references.sh \
+  --benchmark-root data/benchmark \
+  --output-root data/benchmark_refreshed
+```
+
+Only refresh `order_sensitivity` in the final subset:
+
+```bash
+bash scripts/refresh_benchmark_references.sh \
+  --benchmark-root data/benchmark \
+  --output-root data/benchmark_refreshed \
+  --tracks order_sensitivity
+```
+
+If you want to overwrite the final subset in place:
+
+```bash
+bash scripts/refresh_benchmark_references.sh \
+  --benchmark-root data/benchmark
+```
+
 This step is still useful even if you already attached styles to `benchmark_full`:
 
 - it rewrites the final selected subset in `data/benchmark`
@@ -217,6 +247,21 @@ This uses all prompt variants stored in the benchmark row.
 Default predictions filename:
 
 - `predictions_direct.jsonl`
+
+The new evaluation output layout is:
+
+- `data/evaluation/{track}/{model}/predictions_{mode}.jsonl`
+- `data/evaluation/{track}/{model}/score_{mode}/`
+
+So for `gpt_5_4`, examples will look like:
+
+- `data/evaluation/atomic_ops/gpt_5_4/predictions_direct.jsonl`
+- `data/evaluation/main/gpt_5_4/predictions_direct.jsonl`
+- `data/evaluation/order_sensitivity/gpt_5_4/predictions_direct.jsonl`
+
+and:
+
+- `data/evaluation/{track}/gpt_5_4/score_direct/`
 
 ## 6.2 Run a deterministic sampled style subset at infer time
 
@@ -328,6 +373,31 @@ bash scripts/eval/api/eval_gpt_5_4.sh infer --mode plan_first
 bash scripts/eval/api/eval_gpt_5_4.sh infer --mode state_aware
 ```
 
+If you want to run full-style inference and scoring for each mode, use:
+
+```bash
+bash scripts/eval/api/eval_gpt_5_4.sh infer --mode direct
+bash scripts/eval/api/eval_gpt_5_4.sh score --mode direct
+
+bash scripts/eval/api/eval_gpt_5_4.sh infer --mode few_shot
+bash scripts/eval/api/eval_gpt_5_4.sh score --mode few_shot
+
+bash scripts/eval/api/eval_gpt_5_4.sh infer --mode plan_first
+bash scripts/eval/api/eval_gpt_5_4.sh score --mode plan_first
+
+bash scripts/eval/api/eval_gpt_5_4.sh infer --mode state_aware
+bash scripts/eval/api/eval_gpt_5_4.sh score --mode state_aware
+```
+
+If you prefer the one-shot infer+score flow for one mode at a time:
+
+```bash
+bash scripts/eval/api/eval_gpt_5_4.sh all --mode direct
+bash scripts/eval/api/eval_gpt_5_4.sh all --mode few_shot
+bash scripts/eval/api/eval_gpt_5_4.sh all --mode plan_first
+bash scripts/eval/api/eval_gpt_5_4.sh all --mode state_aware
+```
+
 Outputs are automatically separated by mode, for example:
 
 - `predictions_direct.jsonl`
@@ -398,6 +468,24 @@ PYTHONPATH=src python3 -m cdrbench.prompting.build_eval_prompt_tracks \
   --output-dir data/benchmark \
   --tracks atomic_ops main order_sensitivity \
   --min-prompt-variants-per-sample 1
+```
+
+If you want to refresh the final selected subset before running full-style evaluation:
+
+```bash
+bash scripts/refresh_benchmark_references.sh \
+  --benchmark-root data/benchmark \
+  --output-root data/benchmark_refreshed
+```
+
+Then point evaluation at that refreshed subset, for example:
+
+```bash
+EVAL_ROOT=data/benchmark_refreshed \
+bash scripts/eval/api/eval_gpt_5_4.sh infer --mode direct
+
+EVAL_ROOT=data/benchmark_refreshed \
+bash scripts/eval/api/eval_gpt_5_4.sh score --mode direct
 ```
 
 If you want a cheap first GPT smoke test with deterministic 3-style inference:
