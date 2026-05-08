@@ -20,6 +20,8 @@ Options:
   --predictions-root <path>           Inference root. Default: data/evaluation/infer
   --predictions-filename <name>       Predictions filename per track. Default: predictions.jsonl
   --score-dirname <name>              Score subdirectory per track. Default: score
+  --prompt-variant-sample-size <int>  Deterministically sample this many prompt styles at score time. Default: 3
+  --prompt-variant-sampling-seed <int>  Sampling seed used with --prompt-variant-sample-size. Default: 0
   --tracks <csv>                      Comma-separated tracks. Default: atomic_ops,main,order_sensitivity
   --progress-every <int>              Default: 20
   --resume                            Resume scoring from existing report files in the same directory
@@ -48,6 +50,8 @@ fi
 PREDICTIONS_ROOT="data/evaluation/infer"
 PREDICTIONS_FILENAME="predictions.jsonl"
 SCORE_DIRNAME="score"
+PROMPT_VARIANT_SAMPLE_SIZE="3"
+PROMPT_VARIANT_SAMPLING_SEED="0"
 TRACKS_CSV="atomic_ops,main,order_sensitivity"
 PROGRESS_EVERY="20"
 RESUME="false"
@@ -64,6 +68,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --score-dirname)
       SCORE_DIRNAME="$2"
+      shift 2
+      ;;
+    --prompt-variant-sample-size)
+      PROMPT_VARIANT_SAMPLE_SIZE="$2"
+      shift 2
+      ;;
+    --prompt-variant-sampling-seed)
+      PROMPT_VARIANT_SAMPLING_SEED="$2"
       shift 2
       ;;
     --tracks)
@@ -111,6 +123,8 @@ for track in "${TRACKS[@]}"; do
     "$PYTHON_BIN" -m cdrbench.eval.run_benchmark_score
     --predictions-path "$predictions_path"
     --output-dir "$output_dir"
+    --prompt-variant-sample-size "$PROMPT_VARIANT_SAMPLE_SIZE"
+    --prompt-variant-sampling-seed "$PROMPT_VARIANT_SAMPLING_SEED"
     --progress-every "$PROGRESS_EVERY"
     --write-csv-slices
   )

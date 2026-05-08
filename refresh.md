@@ -115,19 +115,26 @@ PYTHONPATH=src python3 -m cdrbench.prompting.build_eval_prompt_tracks \
 Example:
 
 ```bash
-bash scripts/eval/api/eval_gpt_5_4.sh --mode direct
+bash scripts/eval/api/eval_gpt_5_4.sh infer --mode direct
 ```
 
 This uses all prompt variants stored in the benchmark row.
 
-## 5.2 Run a deterministic sampled `@3`
+Default predictions filename:
+
+- `predictions_direct.jsonl`
+
+## 5.2 Run a deterministic sampled style subset at infer time
+
+This is useful when you do **not** want to pay for full-style inference.
+For example, you can first try GPT with a deterministic 3-style subset for one seed.
 
 Example:
 
 ```bash
 PROMPT_VARIANT_SAMPLE_SIZE=3 \
 PROMPT_VARIANT_SAMPLING_SEED=0 \
-bash scripts/eval/api/eval_gpt_5_4.sh --mode direct
+bash scripts/eval/api/eval_gpt_5_4.sh infer --mode direct
 ```
 
 This samples 3 prompt styles per sample deterministically using:
@@ -136,7 +143,23 @@ This samples 3 prompt styles per sample deterministically using:
 - `instance_id`
 - `PROMPT_VARIANT_SAMPLING_SEED`
 
-You can also call infer mode explicitly:
+Default predictions filename for this run:
+
+- `predictions_direct_k3_seed0.jsonl`
+
+If you change the seed, the output filename changes too, so runs do not overwrite each other:
+
+```bash
+PROMPT_VARIANT_SAMPLE_SIZE=3 \
+PROMPT_VARIANT_SAMPLING_SEED=1 \
+bash scripts/eval/api/eval_gpt_5_4.sh infer --mode direct
+```
+
+Default predictions filename:
+
+- `predictions_direct_k3_seed1.jsonl`
+
+You can also call the shared CLI arguments explicitly:
 
 ```bash
 bash scripts/eval/api/eval_gpt_5_4.sh infer \
@@ -145,15 +168,70 @@ bash scripts/eval/api/eval_gpt_5_4.sh infer \
   --prompt-variant-sampling-seed 0
 ```
 
-## 5.3 Run prompt baselines
+## 5.3 Score from a full-style predictions file without re-inference
+
+If you already ran full-style inference once, you can compute `@k` offline from the saved full predictions.
+This avoids re-running inference for `@2`, `@3`, `@4`, etc.
+
+Example: compute `@3` with seed 0 from a full predictions file:
+
+```bash
+SCORE_PROMPT_VARIANT_SAMPLE_SIZE=3 \
+SCORE_PROMPT_VARIANT_SAMPLING_SEED=0 \
+bash scripts/eval/api/eval_gpt_5_4.sh score --mode direct
+```
+
+Default score directory:
+
+- `score_direct_k3_seed0/`
+
+Compute `@2`:
+
+```bash
+SCORE_PROMPT_VARIANT_SAMPLE_SIZE=2 \
+SCORE_PROMPT_VARIANT_SAMPLING_SEED=0 \
+bash scripts/eval/api/eval_gpt_5_4.sh score --mode direct
+```
+
+Default score directory:
+
+- `score_direct_k2_seed0/`
+
+Compute `@4`:
+
+```bash
+SCORE_PROMPT_VARIANT_SAMPLE_SIZE=4 \
+SCORE_PROMPT_VARIANT_SAMPLING_SEED=0 \
+bash scripts/eval/api/eval_gpt_5_4.sh score --mode direct
+```
+
+Default score directory:
+
+- `score_direct_k4_seed0/`
+
+This score-time sampling is deterministic and does **not** re-run inference.
+
+## 5.4 Run a deterministic sampled `@3` directly at infer time
+
+This is the cheapest way to quickly test a model before deciding whether to run full-style inference.
+
+Example:
+
+```bash
+PROMPT_VARIANT_SAMPLE_SIZE=3 \
+PROMPT_VARIANT_SAMPLING_SEED=0 \
+bash scripts/eval/api/eval_gpt_5_4.sh infer --mode direct
+```
+
+## 5.5 Run prompt baselines
 
 Examples:
 
 ```bash
-bash scripts/eval/api/eval_gpt_5_4.sh --mode direct
-bash scripts/eval/api/eval_gpt_5_4.sh --mode few_shot
-bash scripts/eval/api/eval_gpt_5_4.sh --mode plan_first
-bash scripts/eval/api/eval_gpt_5_4.sh --mode state_aware
+bash scripts/eval/api/eval_gpt_5_4.sh infer --mode direct
+bash scripts/eval/api/eval_gpt_5_4.sh infer --mode few_shot
+bash scripts/eval/api/eval_gpt_5_4.sh infer --mode plan_first
+bash scripts/eval/api/eval_gpt_5_4.sh infer --mode state_aware
 ```
 
 Outputs are automatically separated by mode, for example:
@@ -169,6 +247,8 @@ and matching score directories:
 - `score_few_shot/`
 - `score_plan_first/`
 - `score_state_aware/`
+
+If infer-time sampling is enabled, filenames and score directories also include `_k{K}_seed{S}` automatically.
 
 ## 6. Recommended minimal run order
 
@@ -199,8 +279,36 @@ PYTHONPATH=src python3 -m cdrbench.prompting.build_eval_prompt_tracks \
   --min-prompt-variants-per-sample 3
 ```
 
+If you want a cheap first GPT smoke test with deterministic 3-style inference:
+
+```bash
+PROMPT_VARIANT_SAMPLE_SIZE=3 \
+PROMPT_VARIANT_SAMPLING_SEED=0 \
+bash scripts/eval/api/eval_gpt_5_4.sh infer --mode direct
+```
+
+If you later decide to run full-style GPT inference once and derive `@k` offline:
+
+```bash
+bash scripts/eval/api/eval_gpt_5_4.sh infer --mode direct
+
+SCORE_PROMPT_VARIANT_SAMPLE_SIZE=2 \
+SCORE_PROMPT_VARIANT_SAMPLING_SEED=0 \
+bash scripts/eval/api/eval_gpt_5_4.sh score --mode direct
+
+SCORE_PROMPT_VARIANT_SAMPLE_SIZE=3 \
+SCORE_PROMPT_VARIANT_SAMPLING_SEED=0 \
+bash scripts/eval/api/eval_gpt_5_4.sh score --mode direct
+
+SCORE_PROMPT_VARIANT_SAMPLE_SIZE=4 \
+SCORE_PROMPT_VARIANT_SAMPLING_SEED=0 \
+bash scripts/eval/api/eval_gpt_5_4.sh score --mode direct
+```
+
 ## Notes
 
 - `reference_text` is now the single early-stop ground truth text field.
 - `reference_text_full_run` is the extra full-run reference used for `order_sensitivity` analysis.
 - Old fields such as `intermediate_text_at_drop` are removed during refresh.
+- `build_eval_prompt_tracks` now stores all distinct prompt styles per sample.
+- Infer-time sampling and score-time `@k` sampling are deterministic and seed-controlled.

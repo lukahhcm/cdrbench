@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import statistics
 import time
@@ -30,6 +31,15 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
             if line.strip():
                 rows.append(json.loads(line))
     return rows
+
+
+def _stable_json(payload: Any) -> str:
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+
+
+def _stable_id(*parts: Any, length: int = 16) -> str:
+    blob = '||'.join(_stable_json(part) if isinstance(part, (dict, list)) else str(part) for part in parts)
+    return hashlib.sha1(blob.encode('utf-8')).hexdigest()[:length]
 
 
 def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
@@ -161,6 +171,18 @@ def _group_rows_by_instance_id(rows: list[dict[str, Any]]) -> dict[str, list[dic
         if instance_id:
             grouped.setdefault(instance_id, []).append(row)
     return grouped
+
+
+def _instance_row_matches_sampling_config(
+    row: dict[str, Any],
+    *,
+    sample_size: int,
+    sample_seed: int,
+) -> bool:
+    return (
+        int(row.get('prompt_variant_sample_size', 0) or 0) == int(sample_size)
+        and int(row.get('prompt_variant_sampling_seed', 0) or 0) == int(sample_seed)
+    )
 
 
 def _first_non_empty_str(*values: Any) -> str | None:
@@ -296,10 +318,53 @@ def _score_prediction_row(prediction_row: dict[str, Any]) -> list[dict[str, Any]
     return [_score_variant(prediction_row, variant) for variant in variants]
 
 
-def _aggregate_instance_metrics(prediction_row: dict[str, Any], variant_rows: list[dict[str, Any]]) -> dict[str, Any]:
+def _sample_variant_rows(
+    prediction_row: dict[str, Any],
+    variant_rows: list[dict[str, Any]],
+    *,
+    sample_size: int,
+    sample_seed: int,
+) -> list[dict[str, Any]]:
+    if sample_size <= 0 or sample_size >= len(variant_rows):
+        return list(variant_rows)
+    recipe_prompt_key = str(
+        prediction_row.get('recipe_prompt_key')
+        or prediction_row.get('workflow_prompt_key')
+        or ''
+    )
+    instance_id = str(prediction_row.get('instance_id') or '')
+    ranked = sorted(
+        variant_rows,
+        key=lambda row: _stable_id(
+            'prompt-variant-sample',
+            sample_seed,
+            recipe_prompt_key,
+            instance_id,
+            int(row.get('prompt_variant_index', 0) or 0),
+        ),
+    )
+    return sorted(ranked[:sample_size], key=lambda row: int(row.get('prompt_variant_index', 0) or 0))
+
+
+def _aggregate_instance_metrics(
+    prediction_row: dict[str, Any],
+    variant_rows: list[dict[str, Any]],
+    *,
+    sample_size: int,
+    sample_seed: int,
+) -> dict[str, Any]:
     request_ok_rows = [row for row in variant_rows if not bool(row.get('request_error'))]
+    sampled_variant_rows = _sample_variant_rows(
+        prediction_row,
+        variant_rows,
+        sample_size=sample_size,
+        sample_seed=sample_seed,
+    )
+    sampled_request_ok_rows = [row for row in sampled_variant_rows if not bool(row.get('request_error'))]
     strict_recipe_success_values = [1.0 if bool(row.get('recipe_success')) else 0.0 for row in request_ok_rows]
     normalized_recipe_success_values = [1.0 if bool(row.get('norm_recipe_success')) else 0.0 for row in request_ok_rows]
+    strict_recipe_success_sampled_values = [1.0 if bool(row.get('recipe_success')) else 0.0 for row in sampled_request_ok_rows]
+    normalized_recipe_success_sampled_values = [1.0 if bool(row.get('norm_recipe_success')) else 0.0 for row in sampled_request_ok_rows]
     refinement_gain_values = [row.get('refinement_gain') for row in request_ok_rows]
     prompt_variant_metrics = []
     strict_recipe_success_by_index: dict[int, bool | None] = {}
@@ -330,10 +395,14 @@ def _aggregate_instance_metrics(prediction_row: dict[str, Any], variant_rows: li
         {
             'num_prompt_variants': len(variant_rows),
             'num_request_ok_variants': len(request_ok_rows),
+            'num_sampled_prompt_variants': len(sampled_variant_rows),
+            'num_sampled_request_ok_variants': len(sampled_request_ok_rows),
+            'prompt_variant_sample_size': sample_size if sample_size > 0 else len(variant_rows),
+            'prompt_variant_sampling_seed': sample_seed,
             'mean_rs': _mean_optional(normalized_recipe_success_values),
-            'mean_rs@3': (any(normalized_recipe_success_values) if request_ok_rows else None),
+            'mean_rs@k': (any(normalized_recipe_success_sampled_values) if sampled_request_ok_rows else None),
             'mean_rs_strict': _mean_optional(strict_recipe_success_values),
-            'mean_rs_strict@3': (any(strict_recipe_success_values) if request_ok_rows else None),
+            'mean_rs_strict@k': (any(strict_recipe_success_sampled_values) if sampled_request_ok_rows else None),
             'mean_rg': _mean_optional(refinement_gain_values),
             'num_valid_rg_variants': sum(1 for value in refinement_gain_values if value is not None),
             'num_invalid_variants': sum(1 for row in variant_rows if not bool(row.get('valid_prediction'))),
@@ -344,6 +413,9 @@ def _aggregate_instance_metrics(prediction_row: dict[str, Any], variant_rows: li
             'recipe_success_prompt0_strict': strict_recipe_success_by_index.get(0),
         }
     )
+    if sample_size == 3:
+        instance_row['mean_rs@3'] = instance_row['mean_rs@k']
+        instance_row['mean_rs_strict@3'] = instance_row['mean_rs_strict@k']
     return instance_row
 
 
@@ -358,15 +430,15 @@ def _build_order_group_rows(instance_rows: list[dict[str, Any]]) -> list[dict[st
             'order_group_instance_id': group_id,
             'slot_count': len(bucket),
             'ocs': (all(bool(row.get('recipe_success_prompt0')) for row in bucket) if all(row.get('recipe_success_prompt0') is not None for row in bucket) else None),
-            'ocs_at_k': (all(bool(row.get('mean_rs@3')) for row in bucket) if all(row.get('mean_rs@3') is not None for row in bucket) else None),
+            'ocs_at_k': (all(bool(row.get('mean_rs@k')) for row in bucket) if all(row.get('mean_rs@k') is not None for row in bucket) else None),
             'ocs_strict': (
                 all(bool(row.get('recipe_success_prompt0_strict')) for row in bucket)
                 if all(row.get('recipe_success_prompt0_strict') is not None for row in bucket)
                 else None
             ),
             'ocs_at_k_strict': (
-                all(bool(row.get('mean_rs_strict@3')) for row in bucket)
-                if all(row.get('mean_rs_strict@3') is not None for row in bucket)
+                all(bool(row.get('mean_rs_strict@k')) for row in bucket)
+                if all(row.get('mean_rs_strict@k') is not None for row in bucket)
                 else None
             ),
         }
@@ -385,8 +457,8 @@ def _instance_slice_summary(rows: list[dict[str, Any]], key: str) -> list[dict[s
             'count': len(bucket),
             'mean_rs': _mean_optional([item.get('mean_rs') if int(item.get('num_request_ok_variants', 0) or 0) > 0 else None for item in bucket]),
             'mean_rs_strict': _mean_optional([item.get('mean_rs_strict') if int(item.get('num_request_ok_variants', 0) or 0) > 0 else None for item in bucket]),
-            'mean_rs@3': _rate_optional(bucket, 'mean_rs@3'),
-            'mean_rs_strict@3': _rate_optional(bucket, 'mean_rs_strict@3'),
+            'mean_rs@k': _rate_optional(bucket, 'mean_rs@k'),
+            'mean_rs_strict@k': _rate_optional(bucket, 'mean_rs_strict@k'),
             'mean_rg': _mean_optional([item.get('mean_rg') for item in bucket]),
         }
         for value, bucket in sorted(grouped.items())
@@ -441,10 +513,12 @@ def _summary_report_text(summary: dict[str, Any]) -> str:
     if summary.get('model'):
         parts.append(f"model={summary['model']}")
     parts.append(f"num_instances={summary.get('num_instances', 0)}")
+    parts.append(f"prompt_variant_sample_size={summary.get('prompt_variant_sample_size', 0)}")
+    parts.append(f"prompt_variant_sampling_seed={summary.get('prompt_variant_sampling_seed', 0)}")
     parts.append(f"mean_rs={float(summary.get('mean_rs', 0.0)):.4f}")
     parts.append(f"mean_rs_strict={float(summary.get('mean_rs_strict', 0.0)):.4f}")
-    parts.append(f"mean_rs@3={float(summary.get('mean_rs@3', 0.0)):.4f}")
-    parts.append(f"mean_rs_strict@3={float(summary.get('mean_rs_strict@3', 0.0)):.4f}")
+    parts.append(f"mean_rs@k={float(summary.get('mean_rs@k', 0.0)):.4f}")
+    parts.append(f"mean_rs_strict@k={float(summary.get('mean_rs_strict@k', 0.0)):.4f}")
     parts.append(f"mean_rg={float(summary.get('mean_rg', 0.0)):.4f}")
     parts.append(f"valid_prediction_rate={float(summary.get('valid_prediction_rate', 0.0)):.4f}")
     parts.append(f"empty_response_rate={float(summary.get('empty_response_rate', 0.0)):.4f}")
@@ -463,16 +537,21 @@ def _paper_metrics_payload(summary: dict[str, Any]) -> dict[str, Any]:
         'track': summary.get('track'),
         'model': summary.get('model'),
         'num_instances': summary.get('num_instances'),
+        'prompt_variant_sample_size': summary.get('prompt_variant_sample_size'),
+        'prompt_variant_sampling_seed': summary.get('prompt_variant_sampling_seed'),
         'mean_rs': summary.get('mean_rs'),
         'mean_rs_strict': summary.get('mean_rs_strict'),
-        'mean_rs@3': summary.get('mean_rs@3'),
-        'mean_rs_strict@3': summary.get('mean_rs_strict@3'),
+        'mean_rs@k': summary.get('mean_rs@k'),
+        'mean_rs_strict@k': summary.get('mean_rs_strict@k'),
         'mean_rg': summary.get('mean_rg'),
         'valid_prediction_rate': summary.get('valid_prediction_rate'),
         'empty_response_rate': summary.get('empty_response_rate'),
         'format_error_rate': summary.get('format_error_rate'),
         'request_error_rate': summary.get('request_error_rate'),
     }
+    if int(summary.get('prompt_variant_sample_size', 0) or 0) == 3:
+        payload['mean_rs@3'] = summary.get('mean_rs@k')
+        payload['mean_rs_strict@3'] = summary.get('mean_rs_strict@k')
     for key in ('ocs', 'ocs_at_k', 'ocs_strict', 'ocs_at_k_strict', 'rs_front', 'rs_middle', 'rs_end'):
         if key in summary:
             payload[key] = summary.get(key)
@@ -486,6 +565,8 @@ def _build_summary(
     order_group_rows: list[dict[str, Any]],
     model_name: str | None,
     base_url: str | None,
+    sample_size: int,
+    sample_seed: int,
 ) -> dict[str, Any]:
     domain_metadata = _load_domain_metadata()
     mean_rg_values = [row.get('mean_rg') for row in instance_rows if int(row.get('num_valid_rg_variants', 0) or 0) > 0]
@@ -497,10 +578,12 @@ def _build_summary(
         'base_url': base_url,
         'num_instances': len(instance_rows),
         'num_variant_predictions': len(variant_rows),
+        'prompt_variant_sample_size': sample_size,
+        'prompt_variant_sampling_seed': sample_seed,
         'mean_rs': _mean_optional([row.get('mean_rs') if int(row.get('num_request_ok_variants', 0) or 0) > 0 else None for row in instance_rows]),
         'mean_rs_strict': _mean_optional([row.get('mean_rs_strict') if int(row.get('num_request_ok_variants', 0) or 0) > 0 else None for row in instance_rows]),
-        'mean_rs@3': _rate_optional(instance_rows, 'mean_rs@3'),
-        'mean_rs_strict@3': _rate_optional(instance_rows, 'mean_rs_strict@3'),
+        'mean_rs@k': _rate_optional(instance_rows, 'mean_rs@k'),
+        'mean_rs_strict@k': _rate_optional(instance_rows, 'mean_rs_strict@k'),
         'mean_rg': _mean_optional(mean_rg_values),
         'median_rg': _safe_median([float(value) for value in mean_rg_values if value is not None]),
         'valid_prediction_rate': _rate(variant_rows, 'valid_prediction'),
@@ -513,6 +596,9 @@ def _build_summary(
         'by_reference_status': _instance_slice_summary(instance_rows, 'reference_status'),
         'per_prompt_variant': _variant_slice_summary(variant_rows, 'prompt_variant_index'),
     }
+    if sample_size == 3:
+        summary['mean_rs@3'] = summary['mean_rs@k']
+        summary['mean_rs_strict@3'] = summary['mean_rs_strict@k']
     if order_group_rows:
         summary['ocs'] = _rate_optional(order_group_rows, 'ocs')
         summary['ocs_at_k'] = _rate_optional(order_group_rows, 'ocs_at_k')
@@ -530,6 +616,8 @@ def main() -> None:
     parser.add_argument('--predictions-path', required=True)
     parser.add_argument('--output-dir', default=None)
     parser.add_argument('--progress-every', type=int, default=20)
+    parser.add_argument('--prompt-variant-sample-size', type=int, default=3)
+    parser.add_argument('--prompt-variant-sampling-seed', type=int, default=0)
     parser.add_argument('--resume', action='store_true')
     parser.add_argument('--write-csv-slices', action='store_true')
     args = parser.parse_args()
@@ -568,14 +656,29 @@ def main() -> None:
 
     for index, prediction_row in enumerate(prediction_rows, start=1):
         instance_id = str(prediction_row.get('instance_id') or '')
-        if args.resume and instance_id in existing_instance_rows_by_id:
+        if (
+            args.resume
+            and instance_id in existing_instance_rows_by_id
+            and _instance_row_matches_sampling_config(
+                existing_instance_rows_by_id[instance_id],
+                sample_size=args.prompt_variant_sample_size,
+                sample_seed=args.prompt_variant_sampling_seed,
+            )
+        ):
             instance_rows.append(existing_instance_rows_by_id[instance_id])
             scored_variant_rows.extend(existing_variant_rows_by_id.get(instance_id, []))
             reused_instance_count += 1
         else:
             instance_variant_rows = _score_prediction_row(prediction_row)
             scored_variant_rows.extend(instance_variant_rows)
-            instance_rows.append(_aggregate_instance_metrics(prediction_row, instance_variant_rows))
+            instance_rows.append(
+                _aggregate_instance_metrics(
+                    prediction_row,
+                    instance_variant_rows,
+                    sample_size=args.prompt_variant_sample_size,
+                    sample_seed=args.prompt_variant_sampling_seed,
+                )
+            )
             new_instance_count += 1
 
         if index % args.progress_every == 0 or index == total_rows:
@@ -595,6 +698,8 @@ def main() -> None:
         order_group_rows=order_group_rows,
         model_name=inferred_model,
         base_url=inferred_base_url,
+        sample_size=args.prompt_variant_sample_size,
+        sample_seed=args.prompt_variant_sampling_seed,
     )
 
     _write_jsonl(scored_variant_predictions_path, scored_variant_rows)

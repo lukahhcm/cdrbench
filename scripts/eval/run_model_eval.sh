@@ -111,6 +111,8 @@ PROMPT_MODE="${PROMPT_MODE:-direct}"
 FEW_SHOT_SOURCE_ROOT="${FEW_SHOT_SOURCE_ROOT:-data/benchmark_full}"
 PREDICTIONS_FILENAME="${PREDICTIONS_FILENAME:-}"
 SCORE_DIRNAME="${SCORE_DIRNAME:-}"
+SCORE_PROMPT_VARIANT_SAMPLE_SIZE="${SCORE_PROMPT_VARIANT_SAMPLE_SIZE:-3}"
+SCORE_PROMPT_VARIANT_SAMPLING_SEED="${SCORE_PROMPT_VARIANT_SAMPLING_SEED:-0}"
 MAX_SAMPLES="${MAX_SAMPLES:-0}"
 MAX_INPUT_CHARS="${MAX_INPUT_CHARS:-0}"
 MAX_TOKENS="${MAX_TOKENS:-0}"
@@ -132,12 +134,22 @@ case "${PROMPT_MODE}" in
     ;;
 esac
 
+infer_sampling_suffix=""
+if [[ "${PROMPT_VARIANT_SAMPLE_SIZE}" =~ ^[0-9]+$ ]] && [[ "${PROMPT_VARIANT_SAMPLE_SIZE}" -gt 0 ]]; then
+  infer_sampling_suffix="_k${PROMPT_VARIANT_SAMPLE_SIZE}_seed${PROMPT_VARIANT_SAMPLING_SEED}"
+fi
+
+score_sampling_suffix=""
+if [[ "${SCORE_PROMPT_VARIANT_SAMPLE_SIZE}" =~ ^[0-9]+$ ]] && [[ "${SCORE_PROMPT_VARIANT_SAMPLE_SIZE}" -gt 0 ]]; then
+  score_sampling_suffix="_k${SCORE_PROMPT_VARIANT_SAMPLE_SIZE}_seed${SCORE_PROMPT_VARIANT_SAMPLING_SEED}"
+fi
+
 if [[ -z "${PREDICTIONS_FILENAME}" ]]; then
-  PREDICTIONS_FILENAME="predictions_${PROMPT_MODE}.jsonl"
+  PREDICTIONS_FILENAME="predictions_${PROMPT_MODE}${infer_sampling_suffix}.jsonl"
 fi
 
 if [[ -z "${SCORE_DIRNAME}" ]]; then
-  SCORE_DIRNAME="score_${PROMPT_MODE}"
+  SCORE_DIRNAME="score_${PROMPT_MODE}${score_sampling_suffix}"
 fi
 
 prompt_for_api_key_if_needed() {
@@ -221,6 +233,8 @@ run_score() {
     --predictions-root "${PREDICTIONS_ROOT}"
     --predictions-filename "${PREDICTIONS_FILENAME}"
     --score-dirname "${SCORE_DIRNAME}"
+    --prompt-variant-sample-size "${SCORE_PROMPT_VARIANT_SAMPLE_SIZE}"
+    --prompt-variant-sampling-seed "${SCORE_PROMPT_VARIANT_SAMPLING_SEED}"
     --progress-every "${PROGRESS_EVERY}"
   )
   if [[ $# -gt 0 ]]; then
