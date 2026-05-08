@@ -7,7 +7,6 @@ import os
 import string
 import sys
 import types
-import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict
@@ -124,9 +123,7 @@ def _resolve_operator_spec(op_name: str) -> OperatorSpec:
         OPERATOR_KINDS[op_name] = spec.kind
     return spec
 
-APPROXIMATE_OPERATORS = {'token_num_filter'}
-if importlib.util.find_spec('ftfy') is None:
-    APPROXIMATE_OPERATORS.add('fix_unicode_mapper')
+_MODEL_CACHE: Dict[str, Any] = {}
 
 
 class Registry:
@@ -191,14 +188,6 @@ class LazyLoader:
 
     def __getattr__(self, item: str):
         return getattr(self._load(), item)
-
-
-class SimpleTokenizer:
-    def tokenize(self, text: str) -> list[str]:
-        return text.split()
-
-    def encode_as_pieces(self, text: str) -> list[str]:
-        return text.split()
 
 
 class OP:
@@ -366,18 +355,6 @@ def _ensure_module(name: str, package: bool = False) -> types.ModuleType:
     return module
 
 
-def _install_optional_module_shims() -> None:
-    if importlib.util.find_spec('ftfy') is None and 'ftfy' not in sys.modules:
-        ftfy_mod = types.ModuleType('ftfy')
-        ftfy_mod.__spec__ = importlib.machinery.ModuleSpec('ftfy', loader=None)
-
-        def fix_text(text: str, normalization: str = 'NFC') -> str:
-            return unicodedata.normalize(normalization or 'NFC', text)
-
-        ftfy_mod.fix_text = fix_text
-        sys.modules['ftfy'] = ftfy_mod
-
-
 def _load_words_asset(words_dir: str, words_type: str) -> Dict[str, list[str]]:
     words_dict: Dict[str, list[str]] = {}
     search_dirs = [Path(words_dir), LOCAL_REF_ASSETS, DJ_REF_ASSETS]
@@ -405,8 +382,45 @@ def _get_model(model_key, rank=None):
     if not model_key:
         return None
     model_type = model_key.get('model_type')
-    if model_type in {'huggingface', 'sentencepiece'}:
-        return SimpleTokenizer()
+    cache_key = json.dumps(model_key, sort_keys=True, ensure_ascii=False)
+    if cache_key in _MODEL_CACHE:
+        return _MODEL_CACHE[cache_key]
+
+    if model_type == 'huggingface':
+        if importlib.util.find_spec('transformers') is None:
+            pretrained_name = model_key.get('pretrained_model_name_or_path') or '<hf_tokenizer>'
+            raise RuntimeError(
+                'Strict Data-Juicer execution requires the `transformers` package for '
+                f'huggingface tokenizer loading (needed by tokenizer={pretrained_name}). '
+                'Install it with `pip install transformers sentencepiece`.'
+            )
+        from transformers import AutoTokenizer  # type: ignore
+
+        pretrained_name = model_key.get('pretrained_model_name_or_path')
+        if not pretrained_name:
+            raise RuntimeError('Missing `pretrained_model_name_or_path` for huggingface tokenizer loading.')
+        tokenizer = AutoTokenizer.from_pretrained(str(pretrained_name))
+        _MODEL_CACHE[cache_key] = tokenizer
+        return tokenizer
+
+    if model_type == 'sentencepiece':
+        if importlib.util.find_spec('sentencepiece') is None:
+            raise RuntimeError(
+                'Strict Data-Juicer execution requires the `sentencepiece` package for '
+                'sentencepiece tokenizer loading. Install it with `pip install sentencepiece`.'
+            )
+        import sentencepiece as spm  # type: ignore
+
+        model_path = model_key.get('model_path') or model_key.get('pretrained_model_name_or_path')
+        if not model_path:
+            raise RuntimeError('Missing `model_path` or `pretrained_model_name_or_path` for sentencepiece loading.')
+        processor = spm.SentencePieceProcessor()
+        loaded = processor.Load(str(model_path))
+        if not loaded:
+            raise RuntimeError(f'Failed to load sentencepiece model from {model_path}.')
+        _MODEL_CACHE[cache_key] = processor
+        return processor
+
     return None
 
 
@@ -415,8 +429,6 @@ def _patch_nltk_pickle_security() -> None:
 
 
 def install_shims() -> None:
-    _install_optional_module_shims()
-
     data_juicer_mod = _ensure_module('data_juicer', package=True)
     utils_mod = _ensure_module('data_juicer.utils', package=True)
     ops_mod = _ensure_module('data_juicer.ops', package=True)
@@ -496,7 +508,25 @@ def load_operator_module(op_name: str):
     return module
 
 
+def _ensure_exact_operator_dependencies(op_name: str, kwargs: dict[str, Any]) -> None:
+    if op_name == 'fix_unicode_mapper' and importlib.util.find_spec('ftfy') is None:
+        raise RuntimeError(
+            'Strict Data-Juicer execution for `fix_unicode_mapper` requires the `ftfy` package. '
+            'Install it with `pip install ftfy` and retry.'
+        )
+
+    if op_name == 'token_num_filter':
+        if importlib.util.find_spec('transformers') is None:
+            tokenizer_name = kwargs.get('hf_tokenizer') or 'EleutherAI/pythia-6.9b-deduped'
+            raise RuntimeError(
+                'Strict Data-Juicer execution for `token_num_filter` requires a real Hugging Face tokenizer. '
+                f'Install dependencies with `pip install transformers sentencepiece` and ensure tokenizer '
+                f'`{tokenizer_name}` is downloadable or cached locally.'
+            )
+
+
 def create_operator(op_name: str, **kwargs):
+    _ensure_exact_operator_dependencies(op_name, kwargs)
     load_operator_module(op_name)
     if op_name not in OPERATORS.modules:
         raise RuntimeError(
@@ -512,4 +542,4 @@ def get_operator_kind(op_name: str) -> str:
 
 
 def get_operator_execution_mode(op_name: str) -> str:
-    return 'approx' if op_name in APPROXIMATE_OPERATORS else 'exact'
+    return 'exact'
