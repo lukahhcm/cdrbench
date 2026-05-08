@@ -17,7 +17,8 @@ It stores raw model outputs so metrics can be recomputed later without rerunning
 
 Options:
   --eval-root <path>                   Benchmark root. Default: data/benchmark
-  --output-root <path>                 Output root. Default: data/evaluation/infer
+  --output-root <path>                 Output root. Default: data/evaluation
+  --model-dirname <name>               Model subdirectory name. Required
   --predictions-filename <name>        Predictions filename per track. Default: predictions.jsonl
   --tracks <csv>                       Comma-separated tracks. Default: atomic_ops,main,order_sensitivity
   --model <name>                       API model name. Required
@@ -43,13 +44,15 @@ Examples:
   ./scripts/infer_benchmark_tracks.sh \
     --model openai.gpt-5.4-2026-03-05 \
     --base-url https://eval.dashscope.aliyuncs.com/compatible-mode/v1 \
-    --output-root data/evaluation/infer/gpt54
+    --output-root data/evaluation \
+    --model-dirname gpt54
 
   ./scripts/infer_benchmark_tracks.sh \
     --model local-model \
     --base-url http://127.0.0.1:8000/v1 \
     --api-key EMPTY \
-    --output-root data/evaluation/infer/local_model \
+    --output-root data/evaluation \
+    --model-dirname local_model \
     --resume
 EOF
 }
@@ -64,7 +67,8 @@ if [[ ! -x "$PYTHON_BIN" ]]; then
 fi
 
 EVAL_ROOT="data/benchmark"
-OUTPUT_ROOT="data/evaluation/infer"
+OUTPUT_ROOT="data/evaluation"
+MODEL_DIRNAME=""
 PREDICTIONS_FILENAME="predictions.jsonl"
 TRACKS_CSV="atomic_ops,main,order_sensitivity"
 MODEL=""
@@ -92,6 +96,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --output-root)
       OUTPUT_ROOT="$2"
+      shift 2
+      ;;
+    --model-dirname)
+      MODEL_DIRNAME="$2"
       shift 2
       ;;
     --predictions-filename)
@@ -186,6 +194,10 @@ if [[ -z "$MODEL" ]]; then
   echo "--model is required." >&2
   exit 1
 fi
+if [[ -z "$MODEL_DIRNAME" ]]; then
+  echo "--model-dirname is required." >&2
+  exit 1
+fi
 
 export PYTHONPATH="$REPO_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
 IFS=',' read -r -a TRACKS <<< "$TRACKS_CSV"
@@ -210,7 +222,7 @@ track_eval_path() {
 
 for track in "${TRACKS[@]}"; do
   eval_path="$(track_eval_path "$track")"
-  output_dir="$OUTPUT_ROOT/$track"
+  output_dir="$OUTPUT_ROOT/$track/$MODEL_DIRNAME"
   mkdir -p "$output_dir"
   if [[ ! -f "$eval_path" ]]; then
     echo "Missing eval file for track=$track: $eval_path" >&2

@@ -102,8 +102,8 @@ MODEL="${MODEL:-}"
 BASE_URL="${BASE_URL:-}"
 API_KEY="${API_KEY:-}"
 PROMPT_API_KEY="${PROMPT_API_KEY:-false}"
-OUTPUT_ROOT="${OUTPUT_ROOT:-data/evaluation/infer}"
-PREDICTIONS_ROOT="${PREDICTIONS_ROOT:-${OUTPUT_ROOT}}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-data/evaluation}"
+MODEL_DIRNAME="${MODEL_DIRNAME:-${MODEL_SLUG:-}}"
 PROMPT_VARIANT_INDICES="${PROMPT_VARIANT_INDICES:-all}"
 PROMPT_VARIANT_SAMPLE_SIZE="${PROMPT_VARIANT_SAMPLE_SIZE:-0}"
 PROMPT_VARIANT_SAMPLING_SEED="${PROMPT_VARIANT_SAMPLING_SEED:-0}"
@@ -120,6 +120,46 @@ CONCURRENCY="${CONCURRENCY:-4}"
 PROGRESS_EVERY="${PROGRESS_EVERY:-20}"
 RESUME="${RESUME:-true}"
 
+sanitize_model_dirname() {
+  local value="$1"
+  value="$(printf '%s' "$value" | tr -cs '[:alnum:]._-' '_')"
+  value="${value##_}"
+  value="${value%%_}"
+  printf '%s' "${value:-model}"
+}
+
+derive_model_dirname() {
+  if [[ -n "${MODEL_DIRNAME}" ]]; then
+    printf '%s' "${MODEL_DIRNAME}"
+    return
+  fi
+  if [[ -n "${MODEL_SLUG:-}" ]]; then
+    printf '%s' "${MODEL_SLUG}"
+    return
+  fi
+  if [[ -n "${OUTPUT_ROOT}" ]]; then
+    local base
+    base="$(basename "${OUTPUT_ROOT}")"
+    if [[ "${base}" != "evaluation" && "${base}" != "infer" && "${base}" != "." ]]; then
+      printf '%s' "${base}"
+      return
+    fi
+  fi
+  printf '%s' "$(sanitize_model_dirname "${MODEL}")"
+}
+
+derive_evaluation_root() {
+  if [[ -n "${EVALUATION_ROOT:-}" ]]; then
+    printf '%s' "${EVALUATION_ROOT}"
+    return
+  fi
+  if [[ "${OUTPUT_ROOT}" == */infer/* ]]; then
+    printf '%s' "$(dirname "$(dirname "${OUTPUT_ROOT}")")"
+    return
+  fi
+  printf '%s' "${OUTPUT_ROOT}"
+}
+
 if [[ -n "${PROMPT_MODE_OVERRIDE}" ]]; then
   PROMPT_MODE="${PROMPT_MODE_OVERRIDE}"
 fi
@@ -133,6 +173,10 @@ case "${PROMPT_MODE}" in
     exit 1
     ;;
 esac
+
+MODEL_DIRNAME="$(derive_model_dirname)"
+OUTPUT_ROOT="$(derive_evaluation_root)"
+PREDICTIONS_ROOT="${PREDICTIONS_ROOT:-${OUTPUT_ROOT}}"
 
 infer_sampling_suffix=""
 if [[ "${PROMPT_VARIANT_SAMPLE_SIZE}" =~ ^[0-9]+$ ]] && [[ "${PROMPT_VARIANT_SAMPLE_SIZE}" -gt 0 ]]; then
@@ -188,6 +232,7 @@ EOF
     --eval-root "${EVAL_ROOT}"
     --model "${MODEL}"
     --output-root "${OUTPUT_ROOT}"
+    --model-dirname "${MODEL_DIRNAME}"
     --predictions-filename "${PREDICTIONS_FILENAME}"
     --prompt-variant-indices "${PROMPT_VARIANT_INDICES}"
     --prompt-variant-sample-size "${PROMPT_VARIANT_SAMPLE_SIZE}"
@@ -219,7 +264,7 @@ EOF
 remove_existing_scores() {
   IFS=',' read -r -a TRACK_LIST <<< "${TRACKS}"
   for track in "${TRACK_LIST[@]}"; do
-    score_dir="${PREDICTIONS_ROOT}/${track}/score"
+    score_dir="${PREDICTIONS_ROOT}/${track}/${MODEL_DIRNAME}/${SCORE_DIRNAME}"
     rm -rf "${score_dir}"
   done
 }
@@ -231,6 +276,7 @@ run_score() {
     "${REPO_ROOT}/scripts/score_benchmark_tracks.sh"
     --tracks "${TRACKS}"
     --predictions-root "${PREDICTIONS_ROOT}"
+    --model-dirname "${MODEL_DIRNAME}"
     --predictions-filename "${PREDICTIONS_FILENAME}"
     --score-dirname "${SCORE_DIRNAME}"
     --prompt-variant-sample-size "${SCORE_PROMPT_VARIANT_SAMPLE_SIZE}"

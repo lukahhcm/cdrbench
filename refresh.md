@@ -62,40 +62,44 @@ bash scripts/refresh_benchmark_references.sh \
   --output-root data/benchmark_full_refreshed
 ```
 
-## 2. Attach all prompt styles to `benchmark_full` first
+## 2. Build a prompt-aware `benchmark_full` from existing prompt libraries
 
-If you want subset selection to use prompt-style availability, the current supported path is:
+This is now the recommended path.
 
-1. refresh `benchmark_full`
-2. write `prompt_variants` onto `benchmark_full`
-3. select the engineering subset from that prompt-aware full benchmark
+The goal is:
 
-This is required before using `--min-prompt-variants K` in the subset builders.
+1. keep the existing prompt library
+2. do not regenerate prompts
+3. recompute the same `recipe_prompt_key` on `benchmark_instances`
+4. join `benchmark_instances` with `prompt_library`
+5. write a new prompt-aware full benchmark
 
-Here `--benchmark-dir` and `--prompt-library` should both point to the directory roots above, not to a single `.jsonl` file.
-When writing back into `benchmark_full`, always use `--preserve-all-benchmark-rows` so unmatched rows are kept with `prompt_variant_count=0` instead of being dropped from the full benchmark.
-
-```bash
-PYTHONPATH=src python3 -m cdrbench.prompting.build_eval_prompt_tracks \
-  --benchmark-dir data/benchmark_full \
-  --prompt-library data/processed/prompt_library \
-  --output-dir data/benchmark_full \
-  --tracks atomic_ops main order_sensitivity \
-  --min-prompt-variants-per-sample 1 \
-  --preserve-all-benchmark-rows
-```
-
-If your refreshed full benchmark is in a separate directory, use that instead:
+Use the new script below. It writes to a new root such as `data/benchmark_full_prompt`, so it does not overwrite your existing `benchmark_full`.
 
 ```bash
-PYTHONPATH=src python3 -m cdrbench.prompting.build_eval_prompt_tracks \
-  --benchmark-dir data/benchmark_full_refreshed \
+bash scripts/build_prompt_benchmark_full.sh \
+  --benchmark-dir data/processed/benchmark_instances \
   --prompt-library data/processed/prompt_library \
-  --output-dir data/benchmark_full_refreshed \
-  --tracks atomic_ops main order_sensitivity \
-  --min-prompt-variants-per-sample 1 \
-  --preserve-all-benchmark-rows
+  --output-dir data/benchmark_full_prompt \
+  --min-prompt-variants-per-sample 1
 ```
+
+Important:
+
+- This step reuses the already-generated prompt library.
+- It does not regenerate any 11-style prompts.
+- It preserves unmatched rows by default, with `prompt_variant_count=0` or a smaller count if needed.
+- If you only want rows that successfully matched a prompt pool, add:
+
+```bash
+--drop-unmatched-rows
+```
+
+After this step, subset selection should read from:
+
+- `data/benchmark_full_prompt/main/main.jsonl`
+- `data/benchmark_full_prompt/order_sensitivity/order_sensitivity.jsonl`
+- `data/benchmark_full_prompt/atomic_ops/atomic_ops.jsonl`
 
 ## 3. Rebuild the engineering `main` subset
 
@@ -110,16 +114,7 @@ By default, this step does **not** filter by prompt-style count.
 
 ```bash
 bash scripts/build_engineering_main_subset.sh \
-  --source-dir data/benchmark_full/main \
-  --processed-summary-dir data/processed/benchmark_instances \
-  --output-dir data/benchmark/main
-```
-
-If you refreshed into a separate directory, use that instead:
-
-```bash
-bash scripts/build_engineering_main_subset.sh \
-  --source-dir data/benchmark_full_refreshed/main \
+  --source-dir data/benchmark_full_prompt/main \
   --processed-summary-dir data/processed/benchmark_instances \
   --output-dir data/benchmark/main
 ```
@@ -129,7 +124,7 @@ For example, for `@5`, select only rows with at least 5 prompt variants:
 
 ```bash
 bash scripts/build_engineering_main_subset.sh \
-  --source-dir data/benchmark_full/main \
+  --source-dir data/benchmark_full_prompt/main \
   --output-dir data/benchmark/main \
   --min-prompt-variants 5
 ```
@@ -140,16 +135,7 @@ When `--min-prompt-variants > 0`, the builder still uses the original `processed
 
 ```bash
 bash scripts/build_engineering_order_subset.sh \
-  --source-dir data/benchmark_full/order_sensitivity \
-  --processed-summary-dir data/processed/benchmark_instances \
-  --output-dir data/benchmark/order_sensitivity
-```
-
-If you refreshed into a separate directory, use that instead:
-
-```bash
-bash scripts/build_engineering_order_subset.sh \
-  --source-dir data/benchmark_full_refreshed/order_sensitivity \
+  --source-dir data/benchmark_full_prompt/order_sensitivity \
   --processed-summary-dir data/processed/benchmark_instances \
   --output-dir data/benchmark/order_sensitivity
 ```
@@ -158,18 +144,25 @@ For an `@5`-ready order subset:
 
 ```bash
 bash scripts/build_engineering_order_subset.sh \
-  --source-dir data/benchmark_full/order_sensitivity \
+  --source-dir data/benchmark_full_prompt/order_sensitivity \
   --output-dir data/benchmark/order_sensitivity \
-  --min-prompt-variants 5
+  --min-prompt-variants 5 \
+  --families-per-recipe 0 \
+  --groups-per-family 0
 ```
 
-The same rule applies here: summary-based family selection is still used first, but `prompt_variants` availability is added as an eligibility constraint so only families with enough surviving prompt-rich groups remain selectable.
+For diagnosis, the `order` command above is intentionally relaxed:
+
+- `--families-per-recipe 0` means do not cap family count
+- `--groups-per-family 0` means do not cap complete `front/middle/end` groups
+
+This is the safest way to first measure how much prompt-aware order data you actually have.
 
 If you also want the atomic subset to be `@5`-ready:
 
 ```bash
 bash scripts/build_engineering_atomic_subset.sh \
-  --source-dir data/benchmark_full/atomic_ops \
+  --source-dir data/benchmark_full_prompt/atomic_ops \
   --output-dir data/benchmark/atomic_ops \
   --min-prompt-variants 5
 ```
@@ -205,7 +198,7 @@ This step is still useful even if you already attached styles to `benchmark_full
 
 So the current recommended split is:
 
-- Step 2: attach styles to `benchmark_full`
+- Step 2: build `benchmark_full_prompt` from `benchmark_instances + prompt_library`
 - Step 3 / Step 4: optionally enforce `--min-prompt-variants K` while selecting the subset
 - Step 5: attach styles to the final selected subset in `data/benchmark`
 
@@ -358,21 +351,19 @@ If you just want the shortest safe path:
 ```bash
 bash scripts/refresh_benchmark_references.sh
 
-PYTHONPATH=src python3 -m cdrbench.prompting.build_eval_prompt_tracks \
-  --benchmark-dir data/benchmark_full \
+bash scripts/build_prompt_benchmark_full.sh \
+  --benchmark-dir data/processed/benchmark_instances \
   --prompt-library data/processed/prompt_library \
-  --output-dir data/benchmark_full \
-  --tracks atomic_ops main order_sensitivity \
-  --min-prompt-variants-per-sample 1 \
-  --preserve-all-benchmark-rows
+  --output-dir data/benchmark_full_prompt \
+  --min-prompt-variants-per-sample 1
 
 bash scripts/build_engineering_main_subset.sh \
-  --source-dir data/benchmark_full/main \
+  --source-dir data/benchmark_full_prompt/main \
   --processed-summary-dir data/processed/benchmark_instances \
   --output-dir data/benchmark/main
 
 bash scripts/build_engineering_order_subset.sh \
-  --source-dir data/benchmark_full/order_sensitivity \
+  --source-dir data/benchmark_full_prompt/order_sensitivity \
   --processed-summary-dir data/processed/benchmark_instances \
   --output-dir data/benchmark/order_sensitivity
 ```
@@ -381,17 +372,19 @@ If you want a subset that is explicitly ready for `@5`, use:
 
 ```bash
 bash scripts/build_engineering_main_subset.sh \
-  --source-dir data/benchmark_full/main \
+  --source-dir data/benchmark_full_prompt/main \
   --output-dir data/benchmark/main \
   --min-prompt-variants 5
 
 bash scripts/build_engineering_order_subset.sh \
-  --source-dir data/benchmark_full/order_sensitivity \
+  --source-dir data/benchmark_full_prompt/order_sensitivity \
   --output-dir data/benchmark/order_sensitivity \
-  --min-prompt-variants 5
+  --min-prompt-variants 5 \
+  --families-per-recipe 0 \
+  --groups-per-family 0
 
 bash scripts/build_engineering_atomic_subset.sh \
-  --source-dir data/benchmark_full/atomic_ops \
+  --source-dir data/benchmark_full_prompt/atomic_ops \
   --output-dir data/benchmark/atomic_ops \
   --min-prompt-variants 5
 ```
@@ -435,12 +428,15 @@ bash scripts/eval/api/eval_gpt_5_4.sh score --mode direct
 
 ## Notes
 
-- If you already ran Step 2 without `--preserve-all-benchmark-rows`, your `benchmark_full` may already have been destructively filtered. Restore or regenerate the original `benchmark_full` before rerunning the prompt-attach step.
+- `build_prompt_benchmark_full.sh` is the new safe entry point when you want to reuse an existing prompt library without regenerating prompts.
+- It computes the same `recipe_prompt_key` used during prompt-library generation and writes prompt-aware rows into a new full-benchmark root.
+- You should now select subsets from `data/benchmark_full_prompt`, not directly from `data/processed/benchmark_instances`.
 
 - `reference_text` is now the single early-stop ground truth text field.
 - `reference_text_full_run` is the extra full-run reference used for `order_sensitivity` analysis.
 - Old fields such as `intermediate_text_at_drop` are removed during refresh.
 - `build_eval_prompt_tracks` now stores all distinct prompt styles per sample.
-- If you care about `@5`, first attach styles to `benchmark_full`, then enforce `--min-prompt-variants 5` during subset selection from that prompt-aware full benchmark.
+- `materialize_benchmark_instances.py` now also writes `recipe_prompt_key`, so future benchmark-instance rebuilds will carry the prompt join key directly.
+- If you care about `@5`, first build `benchmark_full_prompt`, then enforce `--min-prompt-variants 5` during subset selection from that prompt-aware full benchmark.
 - The final prompt-track rebuild on `data/benchmark` is for carrying all styles into the selected subset, not for another round of benchmark filtering.
 - Infer-time sampling and score-time `@k` sampling are deterministic and seed-controlled.

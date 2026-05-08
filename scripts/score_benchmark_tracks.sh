@@ -17,7 +17,8 @@ This step only reads predictions, computes metrics, and writes reports under eac
 track's `score/` subdirectory. It also writes slice CSVs such as `by_domain.csv`.
 
 Options:
-  --predictions-root <path>           Inference root. Default: data/evaluation/infer
+  --predictions-root <path>           Inference root. Default: data/evaluation
+  --model-dirname <name>              Model subdirectory name. Required
   --predictions-filename <name>       Predictions filename per track. Default: predictions.jsonl
   --score-dirname <name>              Score subdirectory per track. Default: score
   --prompt-variant-sample-size <int>  Deterministically sample this many prompt styles at score time. Default: 3
@@ -30,11 +31,13 @@ Options:
 
 Examples:
   ./scripts/score_benchmark_tracks.sh \
-    --predictions-root data/evaluation/infer/gpt54
+    --predictions-root data/evaluation \
+    --model-dirname gpt54
 
   ./scripts/score_benchmark_tracks.sh \
     --tracks atomic_ops,main,order_sensitivity \
-    --predictions-root data/evaluation/infer/local_model
+    --predictions-root data/evaluation \
+    --model-dirname local_model
 EOF
 }
 
@@ -47,7 +50,8 @@ if [[ ! -x "$PYTHON_BIN" ]]; then
   PYTHON_BIN="python3"
 fi
 
-PREDICTIONS_ROOT="data/evaluation/infer"
+PREDICTIONS_ROOT="data/evaluation"
+MODEL_DIRNAME=""
 PREDICTIONS_FILENAME="predictions.jsonl"
 SCORE_DIRNAME="score"
 PROMPT_VARIANT_SAMPLE_SIZE="3"
@@ -60,6 +64,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --predictions-root)
       PREDICTIONS_ROOT="$2"
+      shift 2
+      ;;
+    --model-dirname)
+      MODEL_DIRNAME="$2"
       shift 2
       ;;
     --predictions-filename)
@@ -109,9 +117,14 @@ done
 export PYTHONPATH="$REPO_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
 IFS=',' read -r -a TRACKS <<< "$TRACKS_CSV"
 
+if [[ -z "$MODEL_DIRNAME" ]]; then
+  echo "--model-dirname is required." >&2
+  exit 1
+fi
+
 for track in "${TRACKS[@]}"; do
-  predictions_path="$PREDICTIONS_ROOT/$track/$PREDICTIONS_FILENAME"
-  output_dir="$PREDICTIONS_ROOT/$track/$SCORE_DIRNAME"
+  predictions_path="$PREDICTIONS_ROOT/$track/$MODEL_DIRNAME/$PREDICTIONS_FILENAME"
+  output_dir="$PREDICTIONS_ROOT/$track/$MODEL_DIRNAME/$SCORE_DIRNAME"
   mkdir -p "$output_dir"
 
   if [[ ! -f "$predictions_path" ]]; then

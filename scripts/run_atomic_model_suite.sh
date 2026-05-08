@@ -48,8 +48,8 @@ TRACKS="atomic_ops"
 
 EVAL_ROOT="${EVAL_ROOT:-data/benchmark}"
 
-# Output root. The script will create one subdirectory per model slug.
-INFERENCE_ROOT="${INFERENCE_ROOT:-data/evaluation/infer}"
+# Output root. The script will create one subdirectory per track and model slug.
+INFERENCE_ROOT="${INFERENCE_ROOT:-data/evaluation}"
 
 # Inference behavior.
 PROMPT_VARIANT_INDICES="${PROMPT_VARIANT_INDICES:-all}"
@@ -109,7 +109,8 @@ run_infer_for_model() {
     --tracks "$TRACKS"
     --eval-root "$EVAL_ROOT"
     --model "$model_name"
-    --output-root "$INFERENCE_ROOT/$model_slug"
+    --output-root "$INFERENCE_ROOT"
+    --model-dirname "$model_slug"
     --prompt-variant-indices "$PROMPT_VARIANT_INDICES"
     --max-samples "$MAX_SAMPLES"
     --max-input-chars "$MAX_INPUT_CHARS"
@@ -139,7 +140,8 @@ run_score_for_model() {
   local cmd=(
     ./scripts/score_benchmark_tracks.sh
     --tracks "$TRACKS"
-    --predictions-root "$INFERENCE_ROOT/$model_slug"
+    --predictions-root "$INFERENCE_ROOT"
+    --model-dirname "$model_slug"
     --progress-every "$PROGRESS_EVERY"
   )
   if [[ "$RESUME_SCORE" == "true" ]]; then
