@@ -2,6 +2,17 @@
 
 This file collects the commands needed to refresh benchmark references, rebuild the `main` subset, and regenerate prompt-track files after the recent pipeline changes.
 
+Path conventions used below:
+
+- `data/benchmark_full` is a track-root directory, for example:
+  - `data/benchmark_full/atomic_ops/atomic_ops.jsonl`
+  - `data/benchmark_full/main/main.jsonl`
+  - `data/benchmark_full/order_sensitivity/order_sensitivity.jsonl`
+- `data/processed/prompt_library` is also a track-root directory, for example:
+  - `data/processed/prompt_library/atomic_ops/recipe_prompt_library.jsonl`
+  - `data/processed/prompt_library/main/recipe_prompt_library.jsonl`
+  - `data/processed/prompt_library/order_sensitivity/recipe_prompt_library.jsonl`
+
 ## 0. Install strict DJ dependencies
 
 These are now required for exact execution of `fix_unicode_mapper` and `token_num_filter`.
@@ -60,6 +71,8 @@ If you want subset selection to use prompt-style availability, the current suppo
 3. select the engineering subset from that prompt-aware full benchmark
 
 This is required before using `--min-prompt-variants K` in the subset builders.
+
+Here `--benchmark-dir` and `--prompt-library` should both point to the directory roots above, not to a single `.jsonl` file.
 
 ```bash
 PYTHONPATH=src python3 -m cdrbench.prompting.build_eval_prompt_tracks \

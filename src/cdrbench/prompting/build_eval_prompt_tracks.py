@@ -46,6 +46,24 @@ def _resolve_prompt_library_path(base_path: Path, track: str) -> Path:
     )
 
 
+def _resolve_benchmark_track_path(base_dir: Path, track: str) -> Path:
+    filename = TRACK_FILES[track]
+    direct = base_dir / filename
+    if direct.exists():
+        return direct
+    nested = base_dir / track / filename
+    if nested.exists():
+        return nested
+    raise FileNotFoundError(f'missing benchmark track file for {track}: expected {direct} or {nested}')
+
+
+def _resolve_track_output_path(base_dir: Path, track: str) -> Path:
+    nested_dir = base_dir / track
+    if nested_dir.exists():
+        return nested_dir / TRACK_FILES[track]
+    return base_dir / TRACK_FILES[track]
+
+
 def _write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_suffix(path.suffix + '.tmp')
@@ -187,9 +205,10 @@ def main() -> None:
 
     summary_rows = []
     for track in args.tracks:
-        input_path = benchmark_dir / TRACK_FILES[track]
-        if not input_path.exists():
-            print(f'skip missing {track}: {input_path}', flush=True)
+        try:
+            input_path = _resolve_benchmark_track_path(benchmark_dir, track)
+        except FileNotFoundError as exc:
+            print(f'skip missing {track}: {exc}', flush=True)
             continue
         prompt_library_path = _resolve_prompt_library_path(prompt_library_base, track)
         library_rows = _read_jsonl(prompt_library_path)
@@ -246,7 +265,8 @@ def main() -> None:
                     flush=True,
                 )
 
-        count = _write_jsonl(output_dir / TRACK_FILES[track], output_rows)
+        output_path = _resolve_track_output_path(output_dir, track)
+        count = _write_jsonl(output_path, output_rows)
         summary_rows.append(
             {
                 'track': track,
@@ -259,7 +279,7 @@ def main() -> None:
                 'min_prompt_variants_per_sample': args.min_prompt_variants_per_sample,
             }
         )
-        print(f'wrote eval track {track}: {count} rows -> {output_dir / TRACK_FILES[track]}', flush=True)
+        print(f'wrote eval track {track}: {count} rows -> {output_path}', flush=True)
 
     _write_jsonl(output_dir / 'prompt_eval_build_summary.jsonl', summary_rows)
     print(f'wrote eval build summary -> {output_dir / "prompt_eval_build_summary.jsonl"}', flush=True)
