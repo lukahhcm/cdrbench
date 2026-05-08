@@ -50,6 +50,18 @@ def _stable_id(*parts: Any, length: int = 16) -> str:
     return hashlib.sha1(blob.encode('utf-8')).hexdigest()[:length]
 
 
+def _recipe_prompt_key(row: dict[str, Any]) -> str:
+    operator_sequence = list(row.get('operator_sequence') or ([row['operator']] if row.get('operator') else []))
+    return _stable_id(
+        row.get('benchmark_track'),
+        row.get('domain'),
+        _first_present(row, 'recipe_type', 'workflow_type'),
+        row.get('order_slot'),
+        operator_sequence,
+        row.get('filter_params_by_name') or {},
+    )
+
+
 def _write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_suffix(path.suffix + '.tmp')
@@ -415,7 +427,7 @@ def _variant_record(
 ) -> dict[str, Any]:
     instance_id = _stable_id(_first_present(base, 'recipe_variant_id', 'workflow_variant_id'), _record_id(record))
     input_text = str(record.get('text', ''))
-    return {
+    row = {
         'instance_id': instance_id,
         'source_record_id': _record_id(record),
         'input_text': input_text,
@@ -431,6 +443,8 @@ def _variant_record(
         'full_run_reference_trace': None if full_run_execution is None else full_run_execution.get('trace'),
         **base,
     }
+    row['recipe_prompt_key'] = _recipe_prompt_key(row)
+    return row
 
 
 def _select_balanced(
@@ -514,7 +528,7 @@ def _atomic_record(
 ) -> dict[str, Any]:
     source_domain = str(record.get('domain') or 'unknown')
     input_text = str(record.get('text', ''))
-    return {
+    row = {
         'instance_id': _stable_id('atomic', op_name, _record_id(record)),
         'benchmark_track': 'atomic',
         'domain': 'atomic',
@@ -532,6 +546,8 @@ def _atomic_record(
         'reference_text': execution['reference_text'],
         'reference_trace': execution['trace'],
     }
+    row['recipe_prompt_key'] = _recipe_prompt_key(row)
+    return row
 
 
 def _materialize_atomic_mapper(
