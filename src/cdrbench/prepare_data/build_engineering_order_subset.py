@@ -209,6 +209,35 @@ def _select_best_families_with_eligible_rows(
     return selected_families, manifest_rows
 
 
+def _build_eligible_group_rows_by_family(
+    full_rows: list[dict[str, Any]],
+) -> tuple[dict[str, dict[str, list[dict[str, Any]]]], dict[str, int], dict[str, int]]:
+    group_rows_by_family: dict[str, dict[str, list[dict[str, Any]]]] = defaultdict(lambda: defaultdict(list))
+    for row in full_rows:
+        family_id = str(row.get('order_family_id') or '').strip()
+        group_id = str(row.get('order_group_instance_id') or '').strip()
+        if not family_id or not group_id:
+            continue
+        group_rows_by_family[family_id][group_id].append(row)
+
+    eligible_group_rows_by_family: dict[str, dict[str, list[dict[str, Any]]]] = defaultdict(dict)
+    eligible_group_counts_by_family_id: dict[str, int] = defaultdict(int)
+    eligible_variant_counts_by_family_id: dict[str, int] = defaultdict(int)
+    for family_id, groups in group_rows_by_family.items():
+        for group_id, rows in groups.items():
+            normalized = _normalize_group_rows(rows)
+            if normalized is None:
+                continue
+            eligible_group_rows_by_family[family_id][group_id] = normalized
+            eligible_group_counts_by_family_id[family_id] += 1
+            eligible_variant_counts_by_family_id[family_id] += len(normalized)
+    return (
+        eligible_group_rows_by_family,
+        eligible_group_counts_by_family_id,
+        eligible_variant_counts_by_family_id,
+    )
+
+
 def _select_best_families_from_rows(full_rows: list[dict[str, Any]]) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]]:
     group_rows_by_family: dict[str, dict[str, list[dict[str, Any]]]] = defaultdict(lambda: defaultdict(list))
     family_meta_by_id: dict[str, dict[str, Any]] = {}
@@ -302,21 +331,16 @@ def main() -> None:
             row for row in full_rows if _prompt_variant_count(row) >= args.min_prompt_variants
         ]
 
+    eligible_group_rows_by_family: dict[str, dict[str, list[dict[str, Any]]]] = defaultdict(dict)
+
     selected_families_by_id: dict[str, dict[str, Any]]
     manifest_rows: list[dict[str, Any]]
     if args.min_prompt_variants > 0:
-        eligible_group_counts_by_family_id: dict[str, int] = defaultdict(int)
-        eligible_variant_counts_by_family_id: dict[str, int] = defaultdict(int)
-        eligible_group_ids_by_family: dict[str, set[str]] = defaultdict(set)
-        for row in full_rows:
-            family_id = str(row.get('order_family_id') or '').strip()
-            group_id = str(row.get('order_group_instance_id') or '').strip()
-            if not family_id or not group_id:
-                continue
-            eligible_variant_counts_by_family_id[family_id] += 1
-            eligible_group_ids_by_family[family_id].add(group_id)
-        for family_id, group_ids in eligible_group_ids_by_family.items():
-            eligible_group_counts_by_family_id[family_id] = len(group_ids)
+        (
+            eligible_group_rows_by_family,
+            eligible_group_counts_by_family_id,
+            eligible_variant_counts_by_family_id,
+        ) = _build_eligible_group_rows_by_family(full_rows)
         summary_rows = _read_table(summary_path)
         selected_families_by_id, manifest_rows = _select_best_families_with_eligible_rows(
             summary_rows,
@@ -334,11 +358,16 @@ def main() -> None:
         raise SystemExit(f'no usable order families found in {benchmark_path} or {summary_path}')
 
     group_rows_by_family: dict[str, dict[str, list[dict[str, Any]]]] = defaultdict(lambda: defaultdict(list))
-    for row in full_rows:
-        family_id = str(row.get('order_family_id') or '')
-        group_id = str(row.get('order_group_instance_id') or '')
-        if family_id in selected_families_by_id and group_id:
-            group_rows_by_family[family_id][group_id].append(row)
+    if args.min_prompt_variants > 0:
+        for family_id, groups in eligible_group_rows_by_family.items():
+            if family_id in selected_families_by_id:
+                group_rows_by_family[family_id] = groups
+    else:
+        for row in full_rows:
+            family_id = str(row.get('order_family_id') or '')
+            group_id = str(row.get('order_group_instance_id') or '')
+            if family_id in selected_families_by_id and group_id:
+                group_rows_by_family[family_id][group_id].append(row)
 
     subset_rows: list[dict[str, Any]] = []
     kept_manifest_rows: list[dict[str, Any]] = []
@@ -352,6 +381,8 @@ def main() -> None:
         normalized_groups.sort(key=lambda item: _group_sort_key(item[1]))
         selected_groups = normalized_groups[: args.groups_per_family]
         family_subset_rows = [row for _, rows in selected_groups for row in rows]
+        if args.min_prompt_variants > 0 and not selected_groups:
+            continue
         subset_rows.extend(family_subset_rows)
         kept_manifest_rows.append(
             {
