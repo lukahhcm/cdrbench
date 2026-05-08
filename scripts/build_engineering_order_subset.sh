@@ -21,6 +21,7 @@ Options:
   --processed-summary-dir <path>     Benchmark-instance summary directory. Default: data/processed/benchmark_instances
   --output-dir <path>                Output subset directory. Default: data/benchmark/order_sensitivity
   --groups-per-family <int>          Max groups kept per retained family. Default: 5
+  --min-prompt-variants <int>        Require at least this many prompt variants per row; when > 0, selection is driven directly from benchmark_full rows
   -h, --help                         Show this help
 EOF
 }
@@ -38,6 +39,7 @@ SOURCE_DIR="data/benchmark_full/order_sensitivity"
 PROCESSED_SUMMARY_DIR="data/processed/benchmark_instances"
 OUTPUT_DIR="data/benchmark/order_sensitivity"
 GROUPS_PER_FAMILY="5"
+MIN_PROMPT_VARIANTS="0"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -55,6 +57,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --groups-per-family)
       GROUPS_PER_FAMILY="$2"
+      shift 2
+      ;;
+    --min-prompt-variants)
+      MIN_PROMPT_VARIANTS="$2"
       shift 2
       ;;
     -h|--help)
@@ -75,4 +81,5 @@ export PYTHONPATH="$REPO_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
   --source-dir "$SOURCE_DIR" \
   --processed-summary-dir "$PROCESSED_SUMMARY_DIR" \
   --output-dir "$OUTPUT_DIR" \
-  --groups-per-family "$GROUPS_PER_FAMILY"
+  --groups-per-family "$GROUPS_PER_FAMILY" \
+  --min-prompt-variants "$MIN_PROMPT_VARIANTS"

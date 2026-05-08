@@ -60,6 +60,8 @@ Current logic keeps only:
 
 It no longer keeps `filter-then-clean`.
 
+By default, this step does **not** filter by prompt-style count.
+
 ```bash
 bash scripts/build_engineering_main_subset.sh \
   --source-dir data/benchmark_full/main \
@@ -75,6 +77,18 @@ bash scripts/build_engineering_main_subset.sh \
   --processed-summary-dir data/processed/benchmark_instances \
   --output-dir data/benchmark/main
 ```
+
+If you want the final subset itself to guarantee support for `@k`, do it here.
+For example, for `@5`, select only rows with at least 5 prompt variants:
+
+```bash
+bash scripts/build_engineering_main_subset.sh \
+  --source-dir data/benchmark_full/main \
+  --output-dir data/benchmark/main \
+  --min-prompt-variants 5
+```
+
+When `--min-prompt-variants > 0`, selection is driven directly from `benchmark_full` rows and their `prompt_variants`; it no longer relies on `data/processed/benchmark_instances` summaries to define the eligible pool.
 
 ## 3. Rebuild the engineering `order_sensitivity` subset
 
@@ -92,6 +106,26 @@ bash scripts/build_engineering_order_subset.sh \
   --source-dir data/benchmark_full_refreshed/order_sensitivity \
   --processed-summary-dir data/processed/benchmark_instances \
   --output-dir data/benchmark/order_sensitivity
+```
+
+For an `@5`-ready order subset:
+
+```bash
+bash scripts/build_engineering_order_subset.sh \
+  --source-dir data/benchmark_full/order_sensitivity \
+  --output-dir data/benchmark/order_sensitivity \
+  --min-prompt-variants 5
+```
+
+The same rule applies here: when `--min-prompt-variants > 0`, the eligible family/group pool is determined from `benchmark_full` rows that already carry enough `prompt_variants`.
+
+If you also want the atomic subset to be `@5`-ready:
+
+```bash
+bash scripts/build_engineering_atomic_subset.sh \
+  --source-dir data/benchmark_full/atomic_ops \
+  --output-dir data/benchmark/atomic_ops \
+  --min-prompt-variants 5
 ```
 
 ## 4. Attach all prompt styles to the selected benchmark subset
@@ -124,6 +158,11 @@ If you later decide to make prompt availability part of benchmark selection itse
 3. attach all styles to the final subset without further filtering
 
 The command above follows the current practical workflow: keep the subset fixed, then attach prompt styles.
+
+So the recommended split is:
+
+- if you want to **fix the benchmark first**, keep `--min-prompt-variants-per-sample 1` here
+- if you want the benchmark itself to be **`@5`-ready**, enforce `--min-prompt-variants 5` during subset selection in Step 2 / Step 3 instead
 
 ## 5. Run inference
 
@@ -285,6 +324,25 @@ bash scripts/build_engineering_order_subset.sh \
   --output-dir data/benchmark/order_sensitivity
 ```
 
+If you want a subset that is explicitly ready for `@5`, use:
+
+```bash
+bash scripts/build_engineering_main_subset.sh \
+  --source-dir data/benchmark_full/main \
+  --output-dir data/benchmark/main \
+  --min-prompt-variants 5
+
+bash scripts/build_engineering_order_subset.sh \
+  --source-dir data/benchmark_full/order_sensitivity \
+  --output-dir data/benchmark/order_sensitivity \
+  --min-prompt-variants 5
+
+bash scripts/build_engineering_atomic_subset.sh \
+  --source-dir data/benchmark_full/atomic_ops \
+  --output-dir data/benchmark/atomic_ops \
+  --min-prompt-variants 5
+```
+
 If you also want prompt-track rebuild on the already selected subset:
 
 ```bash
@@ -329,4 +387,5 @@ bash scripts/eval/api/eval_gpt_5_4.sh score --mode direct
 - Old fields such as `intermediate_text_at_drop` are removed during refresh.
 - `build_eval_prompt_tracks` now stores all distinct prompt styles per sample.
 - The current recommended prompt-track rebuild attaches styles to the already selected subset in `data/benchmark`; it does not intentionally re-filter the subset by prompt count.
+- If you care about `@5`, prefer enforcing `--min-prompt-variants 5` during subset selection from `benchmark_full`, rather than trying to enforce it later at prompt-attach time.
 - Infer-time sampling and score-time `@k` sampling are deterministic and seed-controlled.

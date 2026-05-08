@@ -20,6 +20,7 @@ Options:
   --processed-summary-dir <path>     Benchmark-instance summary directory. Default: data/processed/benchmark_instances
   --output-dir <path>                Output subset directory. Default: data/benchmark/main
   --rows-per-variant <int>           Max rows kept per retained variant. Default: 10
+  --min-prompt-variants <int>        Require at least this many prompt variants per row; when > 0, selection is driven directly from benchmark_full rows
   -h, --help                         Show this help
 EOF
 }
@@ -37,6 +38,7 @@ SOURCE_DIR="data/benchmark_full/main"
 PROCESSED_SUMMARY_DIR="data/processed/benchmark_instances"
 OUTPUT_DIR="data/benchmark/main"
 ROWS_PER_VARIANT="10"
+MIN_PROMPT_VARIANTS="0"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -54,6 +56,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --rows-per-variant)
       ROWS_PER_VARIANT="$2"
+      shift 2
+      ;;
+    --min-prompt-variants)
+      MIN_PROMPT_VARIANTS="$2"
       shift 2
       ;;
     -h|--help)
@@ -74,4 +80,5 @@ export PYTHONPATH="$REPO_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
   --source-dir "$SOURCE_DIR" \
   --processed-summary-dir "$PROCESSED_SUMMARY_DIR" \
   --output-dir "$OUTPUT_DIR" \
-  --rows-per-variant "$ROWS_PER_VARIANT"
+  --rows-per-variant "$ROWS_PER_VARIANT" \
+  --min-prompt-variants "$MIN_PROMPT_VARIANTS"

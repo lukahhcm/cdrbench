@@ -72,6 +72,13 @@ def _to_int(value: Any) -> int:
     return int(float(text))
 
 
+def _prompt_variant_count(row: dict[str, Any]) -> int:
+    variants = row.get('prompt_variants')
+    if isinstance(variants, list):
+        return len(variants)
+    return 0
+
+
 def _row_sort_key(row: dict[str, Any]) -> tuple[str, str]:
     return (str(row.get('source_record_id') or ''), str(row.get('instance_id') or ''))
 
@@ -212,6 +219,7 @@ def main() -> None:
     parser.add_argument('--output-dir', default='data/benchmark/atomic_ops')
     parser.add_argument('--processed-summary-dir', default='data/processed/benchmark_instances')
     parser.add_argument('--rows-per-operator', type=int, default=6)
+    parser.add_argument('--min-prompt-variants', type=int, default=0)
     parser.add_argument('--exclude-instance-id', action='append', default=[])
     parser.add_argument('--exclude-instance-ids-file', default=None)
     parser.add_argument('--exclude-predictions-path', default=None)
@@ -224,9 +232,15 @@ def main() -> None:
     exclude_predictions_path = Path(args.exclude_predictions_path).resolve() if args.exclude_predictions_path else None
     if args.rows_per_operator <= 0:
         raise SystemExit('--rows-per-operator must be > 0')
+    if args.min_prompt_variants < 0:
+        raise SystemExit('--min-prompt-variants must be >= 0')
 
     atomic_path = _resolve_source_file(source_dir, 'atomic_ops.jsonl')
     full_rows = _read_jsonl(atomic_path)
+    if args.min_prompt_variants > 0:
+        full_rows = [
+            row for row in full_rows if _prompt_variant_count(row) >= args.min_prompt_variants
+        ]
     excluded_instance_ids = _load_excluded_instance_ids(
         manual_ids=list(args.exclude_instance_id),
         ids_file=exclude_instance_ids_file,
@@ -234,7 +248,9 @@ def main() -> None:
     )
 
     summary_path = _resolve_optional_file(processed_summary_dir, 'atomic_ops_summary.csv')
-    manifest_by_operator = _summary_manifest(_read_csv(summary_path)) if summary_path is not None else {}
+    manifest_by_operator = {}
+    if args.min_prompt_variants <= 0 and summary_path is not None:
+        manifest_by_operator = _summary_manifest(_read_csv(summary_path))
     if not manifest_by_operator:
         manifest_by_operator = _rows_manifest(full_rows)
     if not manifest_by_operator:
@@ -270,6 +286,7 @@ def main() -> None:
                 ),
                 'excluded_instance_count': excluded_by_operator.get(operator, 0),
                 'eligible_candidate_count': len(rows_by_operator.get(operator, [])),
+                'min_prompt_variants': args.min_prompt_variants,
             }
         )
 

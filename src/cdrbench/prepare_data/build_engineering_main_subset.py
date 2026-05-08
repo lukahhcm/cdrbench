@@ -70,6 +70,13 @@ def _to_int(value: Any) -> int:
     return int(float(text))
 
 
+def _prompt_variant_count(row: dict[str, Any]) -> int:
+    variants = row.get('prompt_variants')
+    if isinstance(variants, list):
+        return len(variants)
+    return 0
+
+
 def _variant_rank_key(row: dict[str, Any]) -> tuple[int, int, int, str]:
     return (
         _to_int(row.get('candidate_count')),
@@ -247,6 +254,7 @@ def main() -> None:
     parser.add_argument('--output-dir', default='data/benchmark/main')
     parser.add_argument('--processed-summary-dir', default='data/processed/benchmark_instances')
     parser.add_argument('--rows-per-variant', type=int, default=10)
+    parser.add_argument('--min-prompt-variants', type=int, default=0)
     args = parser.parse_args()
 
     source_dir = Path(args.source_dir).resolve()
@@ -254,6 +262,8 @@ def main() -> None:
     processed_summary_dir = Path(args.processed_summary_dir).resolve()
     if args.rows_per_variant <= 0:
         raise SystemExit('--rows-per-variant must be > 0')
+    if args.min_prompt_variants < 0:
+        raise SystemExit('--min-prompt-variants must be >= 0')
 
     main_path = _resolve_source_file(source_dir, 'main.jsonl')
     main_summary_path = _resolve_optional_file_candidates(
@@ -271,10 +281,20 @@ def main() -> None:
         )
 
     full_main_rows = _read_jsonl(main_path)
-    summary_rows = _read_table(main_summary_path)
-    selected_variants_by_id, manifest_rows = _select_best_variants(summary_rows)
-    if not selected_variants_by_id:
+    if args.min_prompt_variants > 0:
+        full_main_rows = [
+            row for row in full_main_rows if _prompt_variant_count(row) >= args.min_prompt_variants
+        ]
+
+    selected_variants_by_id: dict[str, dict[str, Any]]
+    manifest_rows: list[dict[str, Any]]
+    if args.min_prompt_variants > 0:
         selected_variants_by_id, manifest_rows = _select_best_variants_from_rows(full_main_rows)
+    else:
+        summary_rows = _read_table(main_summary_path)
+        selected_variants_by_id, manifest_rows = _select_best_variants(summary_rows)
+        if not selected_variants_by_id:
+            selected_variants_by_id, manifest_rows = _select_best_variants_from_rows(full_main_rows)
     if not selected_variants_by_id:
         raise SystemExit(f'no usable main variants found in {main_path} or {main_summary_path}')
 
@@ -300,6 +320,7 @@ def main() -> None:
                 'subset_drop_count': sum(
                     1 for row in sampled_rows if str(row.get('reference_status') or '').upper() == 'DROP'
                 ),
+                'min_prompt_variants': args.min_prompt_variants,
             }
         )
 
