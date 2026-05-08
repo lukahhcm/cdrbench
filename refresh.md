@@ -73,6 +73,7 @@ If you want subset selection to use prompt-style availability, the current suppo
 This is required before using `--min-prompt-variants K` in the subset builders.
 
 Here `--benchmark-dir` and `--prompt-library` should both point to the directory roots above, not to a single `.jsonl` file.
+When writing back into `benchmark_full`, always use `--preserve-all-benchmark-rows` so unmatched rows are kept with `prompt_variant_count=0` instead of being dropped from the full benchmark.
 
 ```bash
 PYTHONPATH=src python3 -m cdrbench.prompting.build_eval_prompt_tracks \
@@ -80,7 +81,8 @@ PYTHONPATH=src python3 -m cdrbench.prompting.build_eval_prompt_tracks \
   --prompt-library data/processed/prompt_library \
   --output-dir data/benchmark_full \
   --tracks atomic_ops main order_sensitivity \
-  --min-prompt-variants-per-sample 1
+  --min-prompt-variants-per-sample 1 \
+  --preserve-all-benchmark-rows
 ```
 
 If your refreshed full benchmark is in a separate directory, use that instead:
@@ -91,7 +93,8 @@ PYTHONPATH=src python3 -m cdrbench.prompting.build_eval_prompt_tracks \
   --prompt-library data/processed/prompt_library \
   --output-dir data/benchmark_full_refreshed \
   --tracks atomic_ops main order_sensitivity \
-  --min-prompt-variants-per-sample 1
+  --min-prompt-variants-per-sample 1 \
+  --preserve-all-benchmark-rows
 ```
 
 ## 3. Rebuild the engineering `main` subset
@@ -360,7 +363,8 @@ PYTHONPATH=src python3 -m cdrbench.prompting.build_eval_prompt_tracks \
   --prompt-library data/processed/prompt_library \
   --output-dir data/benchmark_full \
   --tracks atomic_ops main order_sensitivity \
-  --min-prompt-variants-per-sample 1
+  --min-prompt-variants-per-sample 1 \
+  --preserve-all-benchmark-rows
 
 bash scripts/build_engineering_main_subset.sh \
   --source-dir data/benchmark_full/main \
@@ -430,6 +434,8 @@ bash scripts/eval/api/eval_gpt_5_4.sh score --mode direct
 ```
 
 ## Notes
+
+- If you already ran Step 2 without `--preserve-all-benchmark-rows`, your `benchmark_full` may already have been destructively filtered. Restore or regenerate the original `benchmark_full` before rerunning the prompt-attach step.
 
 - `reference_text` is now the single early-stop ground truth text field.
 - `reference_text_full_run` is the extra full-run reference used for `order_sensitivity` analysis.

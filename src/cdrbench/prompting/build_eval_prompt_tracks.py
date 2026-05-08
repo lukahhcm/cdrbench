@@ -104,6 +104,13 @@ def _recipe_key(row: dict[str, Any]) -> str:
     )
 
 
+def _row_recipe_prompt_key(row: dict[str, Any]) -> str:
+    value = _first_present(row, 'recipe_prompt_key', 'workflow_prompt_key')
+    if value:
+        return str(value)
+    return _recipe_key(row)
+
+
 def _all_distinct_prompt_variants(
     candidates: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -196,6 +203,11 @@ def main() -> None:
         default=3,
         help='Skip samples whose recipe prompt pool cannot supply at least this many distinct styles.',
     )
+    parser.add_argument(
+        '--preserve-all-benchmark-rows',
+        action='store_true',
+        help='Keep every benchmark row in the output even when its prompt pool is missing or has too few styles; prompt fields will still be attached with whatever count is available.',
+    )
     args = parser.parse_args()
 
     benchmark_dir = (ROOT / args.benchmark_dir).resolve()
@@ -227,10 +239,18 @@ def main() -> None:
             flush=True,
         )
         for row_index, row in enumerate(rows, start=1):
-            recipe_prompt_key = _recipe_key(row)
+            recipe_prompt_key = _row_recipe_prompt_key(row)
             candidates = list(library_by_key.get(recipe_prompt_key) or [])
             if not candidates:
                 missing_pool_rows += 1
+                if args.preserve_all_benchmark_rows:
+                    output_rows.append(
+                        _eval_row(
+                            row,
+                            recipe_prompt_key=recipe_prompt_key,
+                            candidates=[],
+                        )
+                    )
                 if row_index % EVAL_PROGRESS_EVERY == 0 or row_index == total_rows:
                     print(
                         f'progress eval track={track} row={row_index}/{total_rows} '
@@ -242,6 +262,14 @@ def main() -> None:
             distinct_style_count = len({str(candidate.get('style_id') or '') for candidate in candidates if candidate.get('style_id')})
             if distinct_style_count < args.min_prompt_variants_per_sample:
                 insufficient_style_rows += 1
+                if args.preserve_all_benchmark_rows:
+                    output_rows.append(
+                        _eval_row(
+                            row,
+                            recipe_prompt_key=recipe_prompt_key,
+                            candidates=candidates,
+                        )
+                    )
                 if row_index % EVAL_PROGRESS_EVERY == 0 or row_index == total_rows:
                     print(
                         f'progress eval track={track} row={row_index}/{total_rows} '
