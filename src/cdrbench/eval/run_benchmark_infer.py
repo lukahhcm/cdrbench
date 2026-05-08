@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 import time
@@ -52,6 +53,15 @@ NON_SCORING_REFUSAL_PATTERNS = (
     re.compile(r'violates? policy', re.IGNORECASE),
     re.compile(r'policy restrictions?', re.IGNORECASE),
 )
+
+
+def _stable_json(payload: Any) -> str:
+    return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+
+
+def _stable_id(*parts: Any, length: int = 16) -> str:
+    blob = '||'.join(_stable_json(part) if isinstance(part, (dict, list)) else str(part) for part in parts)
+    return hashlib.sha1(blob.encode('utf-8')).hexdigest()[:length]
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
