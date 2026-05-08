@@ -94,19 +94,36 @@ bash scripts/build_engineering_order_subset.sh \
   --output-dir data/benchmark/order_sensitivity
 ```
 
-## 4. Rebuild eval-ready benchmark files with all prompt styles
+## 4. Attach all prompt styles to the selected benchmark subset
 
-The prompt benchmark now stores all distinct prompt styles per sample.
-We no longer pre-sample 3 styles at benchmark-build time.
+At this stage, the engineering subset in `data/benchmark` is already fixed.
+So this step should only attach all distinct prompt styles to the selected rows.
+It should not do another round of sample filtering just because some rows have fewer styles.
+
+For that reason:
+
+- use `--benchmark-dir data/benchmark`
+- keep `--min-prompt-variants-per-sample 1`
+
+This preserves the selected benchmark rows and stores all available styles for each row.
+Later, infer-time or score-time sampling will control `@k`.
 
 ```bash
 PYTHONPATH=src python3 -m cdrbench.prompting.build_eval_prompt_tracks \
-  --benchmark-dir data/processed/benchmark_instances \
+  --benchmark-dir data/benchmark \
   --prompt-library data/processed/prompt_library/recipe_prompt_library.jsonl \
   --output-dir data/benchmark \
   --tracks atomic_ops main order_sensitivity \
-  --min-prompt-variants-per-sample 3
+  --min-prompt-variants-per-sample 1
 ```
+
+If you later decide to make prompt availability part of benchmark selection itself, the cleaner conceptual order is:
+
+1. attach or inspect prompt availability on `benchmark_full`
+2. select the final engineering subset from that prompt-aware full benchmark
+3. attach all styles to the final subset without further filtering
+
+The command above follows the current practical workflow: keep the subset fixed, then attach prompt styles.
 
 ## 5. Run inference
 
@@ -268,15 +285,15 @@ bash scripts/build_engineering_order_subset.sh \
   --output-dir data/benchmark/order_sensitivity
 ```
 
-If you also want prompt-track rebuild:
+If you also want prompt-track rebuild on the already selected subset:
 
 ```bash
 PYTHONPATH=src python3 -m cdrbench.prompting.build_eval_prompt_tracks \
-  --benchmark-dir data/processed/benchmark_instances \
+  --benchmark-dir data/benchmark \
   --prompt-library data/processed/prompt_library/recipe_prompt_library.jsonl \
   --output-dir data/benchmark \
   --tracks atomic_ops main order_sensitivity \
-  --min-prompt-variants-per-sample 3
+  --min-prompt-variants-per-sample 1
 ```
 
 If you want a cheap first GPT smoke test with deterministic 3-style inference:
@@ -311,4 +328,5 @@ bash scripts/eval/api/eval_gpt_5_4.sh score --mode direct
 - `reference_text_full_run` is the extra full-run reference used for `order_sensitivity` analysis.
 - Old fields such as `intermediate_text_at_drop` are removed during refresh.
 - `build_eval_prompt_tracks` now stores all distinct prompt styles per sample.
+- The current recommended prompt-track rebuild attaches styles to the already selected subset in `data/benchmark`; it does not intentionally re-filter the subset by prompt count.
 - Infer-time sampling and score-time `@k` sampling are deterministic and seed-controlled.
