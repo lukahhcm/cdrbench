@@ -272,6 +272,8 @@ def main() -> None:
     manifest_rows: list[dict[str, Any]] = []
     for operator in sorted(manifest_by_operator):
         sampled_rows = _take_balanced_rows(rows_by_operator.get(operator, []), args.rows_per_operator)
+        if args.min_prompt_variants > 0 and not sampled_rows:
+            continue
         subset_rows.extend(sampled_rows)
         meta = manifest_by_operator[operator]
         manifest_rows.append(

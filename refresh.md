@@ -88,7 +88,7 @@ bash scripts/build_engineering_main_subset.sh \
   --min-prompt-variants 5
 ```
 
-When `--min-prompt-variants > 0`, selection is driven directly from `benchmark_full` rows and their `prompt_variants`; it no longer relies on `data/processed/benchmark_instances` summaries to define the eligible pool.
+When `--min-prompt-variants > 0`, the builder still uses the original `processed-summary` logic to decide which `clean-only` and `clean-then-filter` variants are preferred. The new part is that prompt-style availability is added as an eligibility filter, so the builder will skip variants whose surviving rows do not have enough `prompt_variants` and fall through to the next eligible candidate when needed.
 
 ## 3. Rebuild the engineering `order_sensitivity` subset
 
@@ -117,7 +117,7 @@ bash scripts/build_engineering_order_subset.sh \
   --min-prompt-variants 5
 ```
 
-The same rule applies here: when `--min-prompt-variants > 0`, the eligible family/group pool is determined from `benchmark_full` rows that already carry enough `prompt_variants`.
+The same rule applies here: summary-based family selection is still used first, but `prompt_variants` availability is added as an eligibility constraint so only families with enough surviving prompt-rich groups remain selectable.
 
 If you also want the atomic subset to be `@5`-ready:
 

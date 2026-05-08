@@ -168,6 +168,47 @@ def _select_best_families(summary_rows: list[dict[str, str]]) -> tuple[dict[str,
     return selected_families, manifest_rows
 
 
+def _select_best_families_with_eligible_rows(
+    summary_rows: list[dict[str, str]],
+    eligible_group_counts_by_family_id: dict[str, int],
+    eligible_variant_counts_by_family_id: dict[str, int],
+) -> tuple[dict[str, dict[str, str]], list[dict[str, Any]]]:
+    kept_rows = [row for row in summary_rows if str(row.get('status') or '').strip() == 'kept']
+    by_recipe: dict[str, list[dict[str, str]]] = defaultdict(list)
+    for row in kept_rows:
+        recipe_id = str(row.get('recipe_id') or '').strip()
+        family_id = str(row.get('order_family_id') or '').strip()
+        if not recipe_id or not family_id:
+            continue
+        if eligible_group_counts_by_family_id.get(family_id, 0) <= 0:
+            continue
+        by_recipe[recipe_id].append(row)
+
+    selected_families: dict[str, dict[str, str]] = {}
+    manifest_rows: list[dict[str, Any]] = []
+    for recipe_id in sorted(by_recipe):
+        best = max(by_recipe[recipe_id], key=_family_rank_key)
+        family_id = str(best['order_family_id'])
+        selected_families[family_id] = best
+        manifest_rows.append(
+            {
+                'recipe_id': recipe_id,
+                'order_family_id': family_id,
+                'filter_name': best.get('filter_name'),
+                'candidate_count': _to_int(best.get('candidate_count')),
+                'usable_record_count': _to_int(best.get('usable_record_count')),
+                'value_count': _to_int(best.get('value_count')),
+                'full_selected_group_count': _to_int(best.get('selected_group_count')),
+                'full_selected_variant_count': _to_int(best.get('selected_variant_count')),
+                'keep_count': _to_int(best.get('keep_count')),
+                'drop_count': _to_int(best.get('drop_count')),
+                'eligible_prompt_group_count': eligible_group_counts_by_family_id.get(family_id, 0),
+                'eligible_prompt_variant_count': eligible_variant_counts_by_family_id.get(family_id, 0),
+            }
+        )
+    return selected_families, manifest_rows
+
+
 def _select_best_families_from_rows(full_rows: list[dict[str, Any]]) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]]:
     group_rows_by_family: dict[str, dict[str, list[dict[str, Any]]]] = defaultdict(lambda: defaultdict(list))
     family_meta_by_id: dict[str, dict[str, Any]] = {}
@@ -264,7 +305,26 @@ def main() -> None:
     selected_families_by_id: dict[str, dict[str, Any]]
     manifest_rows: list[dict[str, Any]]
     if args.min_prompt_variants > 0:
-        selected_families_by_id, manifest_rows = _select_best_families_from_rows(full_rows)
+        eligible_group_counts_by_family_id: dict[str, int] = defaultdict(int)
+        eligible_variant_counts_by_family_id: dict[str, int] = defaultdict(int)
+        eligible_group_ids_by_family: dict[str, set[str]] = defaultdict(set)
+        for row in full_rows:
+            family_id = str(row.get('order_family_id') or '').strip()
+            group_id = str(row.get('order_group_instance_id') or '').strip()
+            if not family_id or not group_id:
+                continue
+            eligible_variant_counts_by_family_id[family_id] += 1
+            eligible_group_ids_by_family[family_id].add(group_id)
+        for family_id, group_ids in eligible_group_ids_by_family.items():
+            eligible_group_counts_by_family_id[family_id] = len(group_ids)
+        summary_rows = _read_table(summary_path)
+        selected_families_by_id, manifest_rows = _select_best_families_with_eligible_rows(
+            summary_rows,
+            eligible_group_counts_by_family_id,
+            eligible_variant_counts_by_family_id,
+        )
+        if not selected_families_by_id:
+            selected_families_by_id, manifest_rows = _select_best_families_from_rows(full_rows)
     else:
         summary_rows = _read_table(summary_path)
         selected_families_by_id, manifest_rows = _select_best_families(summary_rows)

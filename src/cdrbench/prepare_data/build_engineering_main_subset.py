@@ -193,6 +193,49 @@ def _select_best_variants(summary_rows: list[dict[str, str]]) -> tuple[dict[str,
     return selected_variants, manifest_rows
 
 
+def _select_best_variants_with_eligible_rows(
+    summary_rows: list[dict[str, str]],
+    eligible_counts_by_variant_id: dict[str, int],
+) -> tuple[dict[str, dict[str, str]], list[dict[str, Any]]]:
+    kept_rows = [row for row in summary_rows if str(row.get('status') or '').strip() == 'kept']
+    by_recipe_and_type: dict[tuple[str, str], list[dict[str, str]]] = defaultdict(list)
+    for row in kept_rows:
+        recipe_id = str(row.get('recipe_id') or '').strip()
+        recipe_type = str(row.get('recipe_type') or '').strip()
+        variant_id = str(row.get('recipe_variant_id') or '').strip()
+        if not recipe_id or not variant_id or recipe_type not in RECIPE_TYPES:
+            continue
+        if eligible_counts_by_variant_id.get(variant_id, 0) <= 0:
+            continue
+        by_recipe_and_type[(recipe_id, recipe_type)].append(row)
+
+    selected_variants: dict[str, dict[str, str]] = {}
+    manifest_rows: list[dict[str, Any]] = []
+    recipe_ids = sorted({recipe_id for recipe_id, _ in by_recipe_and_type})
+    for recipe_id in recipe_ids:
+        for recipe_type in RECIPE_TYPES:
+            candidates = by_recipe_and_type.get((recipe_id, recipe_type), [])
+            if not candidates:
+                continue
+            best = max(candidates, key=_variant_rank_key)
+            variant_id = str(best['recipe_variant_id'])
+            selected_variants[variant_id] = best
+            manifest_rows.append(
+                {
+                    'recipe_id': recipe_id,
+                    'recipe_type': recipe_type,
+                    'recipe_variant_id': variant_id,
+                    'candidate_count': _to_int(best.get('candidate_count')),
+                    'value_count': _to_int(best.get('value_count')),
+                    'full_selected_count': _to_int(best.get('selected_count')),
+                    'keep_count': _to_int(best.get('keep_count')),
+                    'drop_count': _to_int(best.get('drop_count')),
+                    'eligible_prompt_row_count': eligible_counts_by_variant_id.get(variant_id, 0),
+                }
+            )
+    return selected_variants, manifest_rows
+
+
 def _select_best_variants_from_rows(full_main_rows: list[dict[str, Any]]) -> tuple[dict[str, dict[str, Any]], list[dict[str, Any]]]:
     rows_by_variant_id: dict[str, list[dict[str, Any]]] = defaultdict(list)
     variant_meta_by_id: dict[str, dict[str, Any]] = {}
@@ -289,7 +332,18 @@ def main() -> None:
     selected_variants_by_id: dict[str, dict[str, Any]]
     manifest_rows: list[dict[str, Any]]
     if args.min_prompt_variants > 0:
-        selected_variants_by_id, manifest_rows = _select_best_variants_from_rows(full_main_rows)
+        eligible_counts_by_variant_id: dict[str, int] = defaultdict(int)
+        for row in full_main_rows:
+            variant_id = str(row.get('recipe_variant_id') or '').strip()
+            if variant_id:
+                eligible_counts_by_variant_id[variant_id] += 1
+        summary_rows = _read_table(main_summary_path)
+        selected_variants_by_id, manifest_rows = _select_best_variants_with_eligible_rows(
+            summary_rows,
+            eligible_counts_by_variant_id,
+        )
+        if not selected_variants_by_id:
+            selected_variants_by_id, manifest_rows = _select_best_variants_from_rows(full_main_rows)
     else:
         summary_rows = _read_table(main_summary_path)
         selected_variants_by_id, manifest_rows = _select_best_variants(summary_rows)
