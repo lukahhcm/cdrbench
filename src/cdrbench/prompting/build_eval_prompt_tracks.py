@@ -17,6 +17,10 @@ TRACK_FILES = {
     'atomic_ops': 'atomic_ops.jsonl',
 }
 
+TRACK_PROMPT_LIBRARY_FILES = {
+    track: f'{track}/recipe_prompt_library.jsonl' for track in TRACK_FILES
+}
+
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     rows = []
@@ -25,6 +29,21 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
             if line.strip():
                 rows.append(json.loads(line))
     return rows
+
+
+def _resolve_prompt_library_path(base_path: Path, track: str) -> Path:
+    if base_path.is_file():
+        return base_path
+    track_relative = TRACK_PROMPT_LIBRARY_FILES[track]
+    candidate = base_path / track_relative
+    if candidate.exists():
+        return candidate
+    fallback = base_path / 'recipe_prompt_library.jsonl'
+    if fallback.exists():
+        return fallback
+    raise SystemExit(
+        f'missing prompt library for track={track}: expected {candidate} or {fallback}'
+    )
 
 
 def _write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> int:
@@ -148,7 +167,7 @@ def _eval_row(
 def main() -> None:
     parser = argparse.ArgumentParser(description='Build eval-ready prompt track files from an accepted recipe prompt library.')
     parser.add_argument('--benchmark-dir', default='data/processed/benchmark_instances')
-    parser.add_argument('--prompt-library', default='data/processed/prompt_library/recipe_prompt_library.jsonl')
+    parser.add_argument('--prompt-library', default='data/processed/prompt_library')
     parser.add_argument('--output-dir', default='data/benchmark')
     parser.add_argument('--tracks', nargs='*', default=list(TRACK_FILES), choices=sorted(TRACK_FILES))
     parser.add_argument('--prompt-variants-per-sample', type=int, default=3)
@@ -162,16 +181,9 @@ def main() -> None:
     args = parser.parse_args()
 
     benchmark_dir = (ROOT / args.benchmark_dir).resolve()
-    prompt_library_path = (ROOT / args.prompt_library).resolve()
+    prompt_library_base = (ROOT / args.prompt_library).resolve()
     output_dir = (ROOT / args.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
-
-    library_rows = _read_jsonl(prompt_library_path)
-    library_by_key = {
-        str(_first_present(row, 'recipe_prompt_key', 'workflow_prompt_key')): list(row.get('candidates') or [])
-        for row in library_rows
-        if _first_present(row, 'recipe_prompt_key', 'workflow_prompt_key')
-    }
 
     summary_rows = []
     for track in args.tracks:
@@ -179,12 +191,22 @@ def main() -> None:
         if not input_path.exists():
             print(f'skip missing {track}: {input_path}', flush=True)
             continue
+        prompt_library_path = _resolve_prompt_library_path(prompt_library_base, track)
+        library_rows = _read_jsonl(prompt_library_path)
+        library_by_key = {
+            str(_first_present(row, 'recipe_prompt_key', 'workflow_prompt_key')): list(row.get('candidates') or [])
+            for row in library_rows
+            if _first_present(row, 'recipe_prompt_key', 'workflow_prompt_key')
+        }
         rows = _read_jsonl(input_path)
         total_rows = len(rows)
         output_rows = []
         missing_pool_rows = 0
         insufficient_style_rows = 0
-        print(f'start eval track={track} input_rows={total_rows}', flush=True)
+        print(
+            f'start eval track={track} input_rows={total_rows} prompt_library={prompt_library_path}',
+            flush=True,
+        )
         for row_index, row in enumerate(rows, start=1):
             recipe_prompt_key = _recipe_key(row)
             candidates = list(library_by_key.get(recipe_prompt_key) or [])

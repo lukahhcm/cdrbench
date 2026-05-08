@@ -64,7 +64,7 @@ This is required before using `--min-prompt-variants K` in the subset builders.
 ```bash
 PYTHONPATH=src python3 -m cdrbench.prompting.build_eval_prompt_tracks \
   --benchmark-dir data/benchmark_full \
-  --prompt-library data/processed/prompt_library/recipe_prompt_library.jsonl \
+  --prompt-library data/processed/prompt_library \
   --output-dir data/benchmark_full \
   --tracks atomic_ops main order_sensitivity \
   --min-prompt-variants-per-sample 1
@@ -75,7 +75,7 @@ If your refreshed full benchmark is in a separate directory, use that instead:
 ```bash
 PYTHONPATH=src python3 -m cdrbench.prompting.build_eval_prompt_tracks \
   --benchmark-dir data/benchmark_full_refreshed \
-  --prompt-library data/processed/prompt_library/recipe_prompt_library.jsonl \
+  --prompt-library data/processed/prompt_library \
   --output-dir data/benchmark_full_refreshed \
   --tracks atomic_ops main order_sensitivity \
   --min-prompt-variants-per-sample 1
@@ -175,7 +175,7 @@ Later, infer-time or score-time sampling will control `@k`.
 ```bash
 PYTHONPATH=src python3 -m cdrbench.prompting.build_eval_prompt_tracks \
   --benchmark-dir data/benchmark \
-  --prompt-library data/processed/prompt_library/recipe_prompt_library.jsonl \
+  --prompt-library data/processed/prompt_library \
   --output-dir data/benchmark \
   --tracks atomic_ops main order_sensitivity \
   --min-prompt-variants-per-sample 1
@@ -344,7 +344,7 @@ bash scripts/refresh_benchmark_references.sh
 
 PYTHONPATH=src python3 -m cdrbench.prompting.build_eval_prompt_tracks \
   --benchmark-dir data/benchmark_full \
-  --prompt-library data/processed/prompt_library/recipe_prompt_library.jsonl \
+  --prompt-library data/processed/prompt_library \
   --output-dir data/benchmark_full \
   --tracks atomic_ops main order_sensitivity \
   --min-prompt-variants-per-sample 1
@@ -384,7 +384,7 @@ Then attach styles to the final selected subset:
 ```bash
 PYTHONPATH=src python3 -m cdrbench.prompting.build_eval_prompt_tracks \
   --benchmark-dir data/benchmark \
-  --prompt-library data/processed/prompt_library/recipe_prompt_library.jsonl \
+  --prompt-library data/processed/prompt_library \
   --output-dir data/benchmark \
   --tracks atomic_ops main order_sensitivity \
   --min-prompt-variants-per-sample 1
