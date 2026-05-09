@@ -922,8 +922,7 @@ def main() -> None:
         )
 
     track_name = eval_path.stem or 'unknown'
-    if args.resume and output_path.exists():
-        _write_progress_snapshot(output_path, output_dir, output_rows, model, base_url, track_name)
+    _write_progress_snapshot(output_path, output_dir, output_rows, model, base_url, track_name)
     print(
         f'start infer track={track_name} model={model} '
         f'num_rows={len(rows)} progress_every={args.progress_every} resume={bool(args.resume)} '

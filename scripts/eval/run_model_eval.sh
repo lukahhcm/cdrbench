@@ -21,6 +21,14 @@ Prompt modes:
   state_aware
 
 Configuration is provided by environment variables from thin model wrappers.
+Preferred wrapper inputs:
+  EVALUATION_ROOT   Final root for per-track evaluation outputs. Default: data/evaluation
+  MODEL_SLUG        Directory name under each track, for example glm_5 or gpt_5_4
+
+Compatibility note:
+  OUTPUT_ROOT is still accepted for older wrappers. Legacy values such as
+  data/evaluation/infer/<model_slug> are normalized to the final layout above.
+
 For API models, leave BASE_URL unset to auto-resolve the correct endpoint from the model config.
 If PROMPT_API_KEY=true and API_KEY is empty, the script will prompt for a key before inference.
 EOF
@@ -102,7 +110,8 @@ MODEL="${MODEL:-}"
 BASE_URL="${BASE_URL:-}"
 API_KEY="${API_KEY:-}"
 PROMPT_API_KEY="${PROMPT_API_KEY:-false}"
-OUTPUT_ROOT="${OUTPUT_ROOT:-data/evaluation}"
+EVALUATION_ROOT="${EVALUATION_ROOT:-}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-${EVALUATION_ROOT:-data/evaluation}}"
 MODEL_DIRNAME="${MODEL_DIRNAME:-${MODEL_SLUG:-}}"
 PROMPT_VARIANT_INDICES="${PROMPT_VARIANT_INDICES:-all}"
 PROMPT_VARIANT_SAMPLE_SIZE="${PROMPT_VARIANT_SAMPLE_SIZE:-0}"
