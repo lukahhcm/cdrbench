@@ -155,7 +155,12 @@ def _is_format_instability_error(error_text: Any) -> bool:
     if error_text is None:
         return False
     text = str(error_text)
-    return text == 'empty_response' or text.startswith('json_parse_error:')
+    return (
+        text == 'empty_response'
+        or text.startswith('json_parse_error:')
+        or text.startswith('tag_parse_error')
+        or text.startswith('incomplete_tag_error:')
+    )
 
 
 def _is_request_error(error_text: Any) -> bool:
@@ -163,6 +168,12 @@ def _is_request_error(error_text: Any) -> bool:
         return False
     text = str(error_text)
     return text.startswith('request_error:') or text.startswith('non_scoring_refusal:')
+
+
+def _is_incomplete_tag_error(error_text: Any) -> bool:
+    if error_text is None:
+        return False
+    return str(error_text).startswith('incomplete_tag_error:')
 
 
 def _normalize_variant_predictions(row: dict[str, Any]) -> list[dict[str, Any]]:
@@ -319,6 +330,7 @@ def _score_variant(prediction_row: dict[str, Any], variant_prediction: dict[str,
             'valid_prediction': valid_prediction,
             'retry_attempted': bool(variant_prediction.get('retry_attempted')),
             'format_instability_error': _is_format_instability_error(prediction_error),
+            'incomplete_tag_error': _is_incomplete_tag_error(prediction_error),
             'request_error': _is_request_error(prediction_error),
             'response_usage': variant_prediction.get('response_usage'),
         }
@@ -401,6 +413,7 @@ def _aggregate_instance_metrics(
                 'refinement_gain': None if row.get('refinement_gain') is None else float(row.get('refinement_gain', 0.0)),
                 'prediction_error': row.get('prediction_error'),
                 'format_instability_error': bool(row.get('format_instability_error')),
+                'incomplete_tag_error': bool(row.get('incomplete_tag_error')),
                 'request_error': bool(row.get('request_error')),
             }
         )
@@ -422,6 +435,7 @@ def _aggregate_instance_metrics(
             'num_valid_rg_variants': sum(1 for value in refinement_gain_values if value is not None),
             'num_invalid_variants': sum(1 for row in variant_rows if not bool(row.get('valid_prediction'))),
             'num_format_error_variants': sum(1 for row in variant_rows if bool(row.get('format_instability_error'))),
+            'num_incomplete_tag_error_variants': sum(1 for row in variant_rows if bool(row.get('incomplete_tag_error'))),
             'num_request_error_variants': sum(1 for row in variant_rows if bool(row.get('request_error'))),
             'prompt_variant_metrics': prompt_variant_metrics,
             'recipe_success_prompt0': normalized_recipe_success_by_index.get(0),
@@ -517,6 +531,7 @@ def _variant_slice_summary(rows: list[dict[str, Any]], key: str) -> list[dict[st
             'avg_refinement_gain': _mean_optional([row.get('refinement_gain') for row in bucket]),
             'valid_prediction_rate': _rate(bucket, 'valid_prediction'),
             'format_error_rate': _rate(bucket, 'format_instability_error'),
+            'incomplete_tag_error_rate': _rate(bucket, 'incomplete_tag_error'),
             'request_error_rate': _rate(bucket, 'request_error'),
         }
         for value, bucket in sorted(grouped.items())
@@ -538,6 +553,7 @@ def _summary_report_text(summary: dict[str, Any]) -> str:
     parts.append(f"valid_prediction_rate={float(summary.get('valid_prediction_rate', 0.0)):.4f}")
     parts.append(f"empty_response_rate={float(summary.get('empty_response_rate', 0.0)):.4f}")
     parts.append(f"format_error_rate={float(summary.get('format_error_rate', 0.0)):.4f}")
+    parts.append(f"incomplete_tag_error_rate={float(summary.get('incomplete_tag_error_rate', 0.0)):.4f}")
     parts.append(f"request_error_rate={float(summary.get('request_error_rate', 0.0)):.4f}")
     if 'ocs' in summary:
         parts.append(f"ocs={float(summary.get('ocs', 0.0)):.4f}")
@@ -565,6 +581,7 @@ def _paper_metrics_payload(summary: dict[str, Any]) -> dict[str, Any]:
         'valid_prediction_rate': summary.get('valid_prediction_rate'),
         'empty_response_rate': summary.get('empty_response_rate'),
         'format_error_rate': summary.get('format_error_rate'),
+        'incomplete_tag_error_rate': summary.get('incomplete_tag_error_rate'),
         'request_error_rate': summary.get('request_error_rate'),
     }
     if int(summary.get('prompt_variant_sample_size', 0) or 0) == 3:
@@ -618,6 +635,7 @@ def _build_summary(
         'valid_prediction_rate': _rate(variant_rows, 'valid_prediction'),
         'empty_response_rate': _safe_mean([1.0 if str(row.get('prediction_error') or '') == 'empty_response' else 0.0 for row in variant_rows]),
         'format_error_rate': _rate(variant_rows, 'format_instability_error'),
+        'incomplete_tag_error_rate': _rate(variant_rows, 'incomplete_tag_error'),
         'request_error_rate': _rate(variant_rows, 'request_error'),
         'by_operator': _instance_slice_summary(instance_rows, 'operator'),
         'by_domain': by_domain,

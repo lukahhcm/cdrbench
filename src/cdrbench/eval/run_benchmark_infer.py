@@ -577,15 +577,25 @@ def _final_user_prompt(
 def _extract_tagged_prediction_payload(response_text: str) -> tuple[dict[str, Any] | None, str | None]:
     status_match = re.search(r'<status>\s*(KEEP|DROP)\s*</status>', response_text, flags=re.IGNORECASE | re.DOTALL)
     clean_match = re.search(r'<clean_text>(.*?)</clean_text>', response_text, flags=re.IGNORECASE | re.DOTALL)
-    if not status_match or not clean_match:
+    if not status_match:
         return None, 'tag_parse_error'
     status_value = str(status_match.group(1)).strip().upper()
-    clean_text = str(clean_match.group(1))
+    if clean_match:
+        clean_text = str(clean_match.group(1))
+        output_format = 'tagged_v1'
+        prediction_error = None
+    else:
+        clean_open_match = re.search(r'<clean_text\s*>', response_text, flags=re.IGNORECASE | re.DOTALL)
+        if not clean_open_match:
+            return None, 'tag_parse_error'
+        clean_text = response_text[clean_open_match.end() :]
+        output_format = 'tagged_v1_open_ended'
+        prediction_error = 'incomplete_tag_error: clean_text_missing_closing_tag'
     return {
         'status': status_value,
         'clean_text': clean_text,
-        'output_format': 'tagged_v1',
-    }, None
+        'output_format': output_format,
+    }, prediction_error
 
 
 def _extract_prediction_payload(response_text: str) -> tuple[dict[str, Any] | None, str | None]:
@@ -612,6 +622,7 @@ def _is_retryable_prediction_error(prediction_error: str | None) -> bool:
         prediction_error == 'empty_response'
         or prediction_error.startswith('json_parse_error:')
         or prediction_error.startswith('tag_parse_error')
+        or prediction_error.startswith('incomplete_tag_error:')
     )
 
 
@@ -804,6 +815,7 @@ def main() -> None:
     parser.add_argument('--retry-sleep-seconds', type=float, default=2.0)
     parser.add_argument('--concurrency', type=int, default=1)
     parser.add_argument('--progress-every', type=int, default=DEFAULT_PROGRESS_EVERY)
+    parser.add_argument('--stop-on-parse-error', action='store_true')
     parser.add_argument('--resume', action='store_true')
     args = parser.parse_args()
 
@@ -1026,6 +1038,7 @@ def main() -> None:
             if (
                 prediction_error is not None
                 and stop_message is None
+                and args.stop_on_parse_error
                 and not str(prediction_error).startswith('non_scoring_refusal:')
             ):
                 stop_message = (
