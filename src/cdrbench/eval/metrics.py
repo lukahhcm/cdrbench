@@ -5,7 +5,6 @@ from typing import Any
 
 import editdistance
 
-STOP_AWARE_RG_LAMBDA = 1.0
 STOP_AWARE_RG_EPSILON = 1e-6
 
 
@@ -68,13 +67,15 @@ def compute_recipe_metrics(
     d_input = edit_distance(raw_input, raw_reference)
     d_pred_stop = edit_distance(raw_prediction, raw_reference)
     denominator = d_input + d_pred_stop + STOP_AWARE_RG_EPSILON
-    drop_penalty = 0.0
-    if normalized_reference_status == 'DROP' and raw_reference_full_run:
-        d_pred_full = edit_distance(raw_prediction, raw_reference_full_run)
-        drop_penalty = STOP_AWARE_RG_LAMBDA * float(d_pred_stop - d_pred_full)
-    else:
-        d_pred_full = None
-    refinement_gain = (float(d_input - d_pred_stop) - drop_penalty) / denominator
+    d_pred_full = (
+        edit_distance(raw_prediction, raw_reference_full_run)
+        if normalized_reference_status == 'DROP' and raw_reference_full_run
+        else None
+    )
+    # Base RG is a 0-1 progress score: perfect no-op preservation and perfect
+    # refinement both receive 1, while moving farther from the gold reference
+    # smoothly approaches 0.
+    refinement_gain = 1.0 - (float(d_pred_stop) / denominator)
 
     return {
         'normalized_reference_status': normalized_reference_status,
@@ -95,7 +96,6 @@ def compute_recipe_metrics(
         'edit_distance_prediction_to_reference': d_pred_stop,
         'edit_distance_prediction_to_full_run_reference': d_pred_full,
         'reference_text_full_run': raw_reference_full_run,
-        'stop_aware_rg_lambda': STOP_AWARE_RG_LAMBDA,
         'stop_aware_rg_epsilon': STOP_AWARE_RG_EPSILON,
         'refinement_gain': refinement_gain,
     }

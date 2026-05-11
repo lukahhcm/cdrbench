@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+import matplotlib.pyplot as plt
 import yaml
 
 from cdrbench.eval.metrics import compute_recipe_metrics
@@ -93,6 +94,13 @@ def _write_csv(path: Path, rows: list[dict[str, Any]]) -> None:
         writer.writeheader()
         writer.writerows(rows)
     tmp_path.replace(path)
+
+
+def _safe_slug(value: Any) -> str:
+    text = '' if value is None else str(value).strip().lower()
+    if not text:
+        return 'unknown'
+    return ''.join(ch if ch.isalnum() else '_' for ch in text).strip('_') or 'unknown'
 
 
 def _load_domain_metadata() -> dict[str, dict[str, Any]]:
@@ -316,6 +324,27 @@ def _score_variant(prediction_row: dict[str, Any], variant_prediction: dict[str,
                 'refinement_gain': None,
             }
         )
+    stop_respect_score = None
+    dist_stop = scored.get('edit_distance_prediction_to_reference')
+    dist_full = scored.get('edit_distance_prediction_to_full_run_reference')
+    reference_text = '' if prediction_row.get('reference_text') is None else str(prediction_row.get('reference_text'))
+    reference_text_full_run = '' if prediction_row.get('reference_text_full_run') is None else str(prediction_row.get('reference_text_full_run'))
+    if (
+        valid_prediction
+        and str(prediction_row.get('benchmark_track') or '') == 'order_sensitivity'
+        and str(prediction_row.get('reference_status') or '').strip().upper() == 'DROP'
+        and reference_text_full_run
+        and reference_text != reference_text_full_run
+        and dist_stop is not None
+        and dist_full is not None
+    ):
+        try:
+            stop_respect_score = 1.0 - (
+                float(dist_full)
+                / (float(dist_stop) + float(dist_full) + 1e-6)
+            )
+        except (TypeError, ValueError, ZeroDivisionError):
+            stop_respect_score = None
     scored.update(
         {
             'prompt_variant_index': int(variant_prediction.get('prompt_variant_index', 0) or 0),
@@ -333,6 +362,7 @@ def _score_variant(prediction_row: dict[str, Any], variant_prediction: dict[str,
             'incomplete_tag_error': _is_incomplete_tag_error(prediction_error),
             'request_error': _is_request_error(prediction_error),
             'response_usage': variant_prediction.get('response_usage'),
+            'stop_respect_score': stop_respect_score,
         }
     )
     return scored
@@ -563,6 +593,9 @@ def _summary_report_text(summary: dict[str, Any]) -> str:
     for key in ('rs_front', 'rs_front@k', 'rs_middle', 'rs_middle@k', 'rs_end', 'rs_end@k'):
         if key in summary:
             parts.append(f"{key}={float(summary.get(key, 0.0)):.4f}")
+    for key in ('stop_respect_score', 'stop_respect_front', 'stop_respect_middle', 'stop_respect_end'):
+        if key in summary:
+            parts.append(f"{key}={float(summary.get(key, 0.0)):.4f}")
     return ' '.join(parts)
 
 
@@ -598,10 +631,137 @@ def _paper_metrics_payload(summary: dict[str, Any]) -> dict[str, Any]:
         'rs_middle@k',
         'rs_end',
         'rs_end@k',
+        'stop_respect_score',
+        'stop_respect_front',
+        'stop_respect_middle',
+        'stop_respect_end',
     ):
         if key in summary:
             payload[key] = summary.get(key)
     return payload
+
+
+def _order_drop_distance_rows(variant_rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for row in variant_rows:
+        if bool(row.get('request_error')) or not bool(row.get('valid_prediction')):
+            continue
+        if str(row.get('benchmark_track') or '') != 'order_sensitivity':
+            continue
+        if str(row.get('reference_status') or '').strip().upper() != 'DROP':
+            continue
+        reference_text = '' if row.get('reference_text') is None else str(row.get('reference_text'))
+        full_run_text = '' if row.get('reference_text_full_run') is None else str(row.get('reference_text_full_run'))
+        if not full_run_text or reference_text == full_run_text:
+            continue
+        dist_stop = row.get('edit_distance_prediction_to_reference')
+        dist_full = row.get('edit_distance_prediction_to_full_run_reference')
+        if dist_stop is None or dist_full is None:
+            continue
+        try:
+            dist_stop_f = float(dist_stop)
+            dist_full_f = float(dist_full)
+        except (TypeError, ValueError):
+            continue
+        rows.append(
+            {
+                'instance_id': row.get('instance_id'),
+                'order_group_instance_id': row.get('order_group_instance_id'),
+                'order_slot': row.get('order_slot'),
+                'prompt_variant_index': row.get('prompt_variant_index'),
+                'prompt_style_id': row.get('prompt_style_id'),
+                'domain': row.get('domain'),
+                'source_domain': row.get('source_domain'),
+                'dist_to_stop': dist_stop_f,
+                'dist_to_full': dist_full_f,
+                'dist_gap_full_minus_stop': dist_full_f - dist_stop_f,
+                'closer_to': (
+                    'stop'
+                    if dist_stop_f < dist_full_f
+                    else ('full' if dist_full_f < dist_stop_f else 'tie')
+                ),
+            }
+        )
+    return rows
+
+
+def _plot_order_drop_stop_vs_full(
+    *,
+    output_dir: Path,
+    variant_rows: list[dict[str, Any]],
+    summary: dict[str, Any],
+) -> None:
+    drop_rows = _order_drop_distance_rows(variant_rows)
+    _write_csv(output_dir / 'order_drop_distance_scatter.csv', drop_rows)
+    if not drop_rows:
+        return
+
+    slots = ['front', 'middle', 'end']
+    labels = {'front': 'Pre', 'middle': 'Mid', 'end': 'Post'}
+    colors = {'front': '#d1495b', 'middle': '#edae49', 'end': '#00798c'}
+    max_dist = max(max(float(row['dist_to_stop']), float(row['dist_to_full'])) for row in drop_rows)
+    axis_max = max(1.0, max_dist * 1.05)
+
+    fig, axes = plt.subplots(1, 3, figsize=(13.5, 4.2), sharex=True, sharey=True)
+    any_points = False
+    for ax, slot in zip(axes, slots):
+        slot_rows = [row for row in drop_rows if str(row.get('order_slot') or '') == slot]
+        if slot_rows:
+            any_points = True
+            ax.scatter(
+                [float(row['dist_to_stop']) for row in slot_rows],
+                [float(row['dist_to_full']) for row in slot_rows],
+                s=18,
+                alpha=0.65,
+                color=colors[slot],
+                edgecolors='none',
+            )
+        ax.plot([0, axis_max], [0, axis_max], linestyle='--', linewidth=1.0, color='#666666')
+        ax.set_title(f"{labels[slot]} (n={len(slot_rows)})", fontsize=11)
+        ax.set_xlim(0, axis_max)
+        ax.set_ylim(0, axis_max)
+        ax.grid(alpha=0.2, linewidth=0.6)
+        ax.set_xlabel(r'$d(\hat{t}, t_{\mathrm{stop}})$')
+    axes[0].set_ylabel(r'$d(\hat{t}, t_{\mathrm{full}})$')
+
+    model = summary.get('model') or 'unknown-model'
+    fig.suptitle(
+        f'Order DROP Analysis: Stop vs Full-Run Affinity\nModel={model}',
+        fontsize=12,
+    )
+    fig.text(
+        0.5,
+        0.01,
+        'Points below the dashed diagonal are closer to the full-run reference; '
+        'points above it are closer to the correct stopping reference.',
+        ha='center',
+        fontsize=9,
+    )
+    fig.tight_layout(rect=(0, 0.05, 1, 0.90))
+    fig.savefig(output_dir / 'order_drop_stop_vs_full_scatter.png', dpi=220, bbox_inches='tight')
+    plt.close(fig)
+
+    summary_rows = []
+    for slot in slots:
+        slot_rows = [row for row in drop_rows if str(row.get('order_slot') or '') == slot]
+        if not slot_rows:
+            continue
+        total = len(slot_rows)
+        closer_full = sum(1 for row in slot_rows if row['closer_to'] == 'full')
+        closer_stop = sum(1 for row in slot_rows if row['closer_to'] == 'stop')
+        ties = sum(1 for row in slot_rows if row['closer_to'] == 'tie')
+        summary_rows.append(
+            {
+                'order_slot': slot,
+                'count': total,
+                'closer_to_full_rate': closer_full / total,
+                'closer_to_stop_rate': closer_stop / total,
+                'tie_rate': ties / total,
+                'mean_dist_gap_full_minus_stop': _mean_optional([row['dist_gap_full_minus_stop'] for row in slot_rows]),
+                'median_dist_gap_full_minus_stop': _safe_median([float(row['dist_gap_full_minus_stop']) for row in slot_rows]),
+            }
+        )
+    _write_csv(output_dir / 'order_drop_distance_summary.csv', summary_rows)
 
 
 def _build_summary(
@@ -647,6 +807,10 @@ def _build_summary(
         summary['mean_rs@3'] = summary['mean_rs@k']
         summary['mean_rs_strict@3'] = summary['mean_rs_strict@k']
     if order_group_rows:
+        order_stop_rows = [
+            row for row in variant_rows
+            if row.get('stop_respect_score') is not None
+        ]
         summary['ocs'] = _rate_optional(order_group_rows, 'ocs')
         summary['ocs_at_k'] = _rate_optional(order_group_rows, 'ocs_at_k')
         summary['ocs_strict'] = _rate_optional(order_group_rows, 'ocs_strict')
@@ -657,6 +821,22 @@ def _build_summary(
         summary['rs_middle@k'] = _rate_optional([row for row in instance_rows if str(row.get('order_slot') or '') == 'middle'], 'mean_rs@k')
         summary['rs_end'] = _safe_mean([float(row.get('mean_rs', 0.0)) for row in instance_rows if str(row.get('order_slot') or '') == 'end'])
         summary['rs_end@k'] = _rate_optional([row for row in instance_rows if str(row.get('order_slot') or '') == 'end'], 'mean_rs@k')
+        summary['stop_respect_score'] = _mean_optional([row.get('stop_respect_score') for row in order_stop_rows])
+        summary['stop_respect_front'] = _mean_optional([
+            row.get('stop_respect_score')
+            for row in order_stop_rows
+            if str(row.get('order_slot') or '') == 'front'
+        ])
+        summary['stop_respect_middle'] = _mean_optional([
+            row.get('stop_respect_score')
+            for row in order_stop_rows
+            if str(row.get('order_slot') or '') == 'middle'
+        ])
+        summary['stop_respect_end'] = _mean_optional([
+            row.get('stop_respect_score')
+            for row in order_stop_rows
+            if str(row.get('order_slot') or '') == 'end'
+        ])
         summary['num_order_groups'] = len(order_group_rows)
     return summary
 
@@ -757,6 +937,12 @@ def main() -> None:
     _write_json(output_dir / 'summary.json', summary)
     _write_json(output_dir / 'paper_metrics.json', _paper_metrics_payload(summary))
     _write_text(output_dir / 'report.txt', _summary_report_text(summary))
+    if summary.get('track') == 'order_sensitivity':
+        _plot_order_drop_stop_vs_full(
+            output_dir=output_dir,
+            variant_rows=scored_variant_rows,
+            summary=summary,
+        )
     if args.write_csv_slices:
         _write_csv(output_dir / 'by_operator.csv', summary['by_operator'])
         _write_csv(output_dir / 'by_domain.csv', summary['by_domain'])
