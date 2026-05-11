@@ -324,7 +324,7 @@ def _score_variant(prediction_row: dict[str, Any], variant_prediction: dict[str,
                 'refinement_gain': None,
             }
         )
-    stop_respect_score = None
+    over_exec_score = None
     dist_stop = scored.get('edit_distance_prediction_to_reference')
     dist_full = scored.get('edit_distance_prediction_to_full_run_reference')
     reference_text = '' if prediction_row.get('reference_text') is None else str(prediction_row.get('reference_text'))
@@ -339,12 +339,12 @@ def _score_variant(prediction_row: dict[str, Any], variant_prediction: dict[str,
         and dist_full is not None
     ):
         try:
-            stop_respect_score = 1.0 - (
+            over_exec_score = 1.0 - (
                 float(dist_full)
                 / (float(dist_stop) + float(dist_full) + 1e-6)
             )
         except (TypeError, ValueError, ZeroDivisionError):
-            stop_respect_score = None
+            over_exec_score = None
     scored.update(
         {
             'prompt_variant_index': int(variant_prediction.get('prompt_variant_index', 0) or 0),
@@ -362,7 +362,7 @@ def _score_variant(prediction_row: dict[str, Any], variant_prediction: dict[str,
             'incomplete_tag_error': _is_incomplete_tag_error(prediction_error),
             'request_error': _is_request_error(prediction_error),
             'response_usage': variant_prediction.get('response_usage'),
-            'stop_respect_score': stop_respect_score,
+            'over_exec_score': over_exec_score,
         }
     )
     return scored
@@ -590,10 +590,10 @@ def _summary_report_text(summary: dict[str, Any]) -> str:
         parts.append(f"ocs_at_k={float(summary.get('ocs_at_k', 0.0)):.4f}")
         parts.append(f"ocs_strict={float(summary.get('ocs_strict', 0.0)):.4f}")
         parts.append(f"ocs_at_k_strict={float(summary.get('ocs_at_k_strict', 0.0)):.4f}")
-    for key in ('rs_front', 'rs_front@k', 'rs_middle', 'rs_middle@k', 'rs_end', 'rs_end@k'):
+    for key in ('rs_pre', 'rs_pre@k', 'rs_mid', 'rs_mid@k', 'rs_post', 'rs_post@k'):
         if key in summary:
             parts.append(f"{key}={float(summary.get(key, 0.0)):.4f}")
-    for key in ('stop_respect_score', 'stop_respect_front', 'stop_respect_middle', 'stop_respect_end'):
+    for key in ('over_exec_score', 'over_exec_pre', 'over_exec_mid', 'over_exec_post'):
         if key in summary:
             parts.append(f"{key}={float(summary.get(key, 0.0)):.4f}")
     return ' '.join(parts)
@@ -625,16 +625,16 @@ def _paper_metrics_payload(summary: dict[str, Any]) -> dict[str, Any]:
         'ocs_at_k',
         'ocs_strict',
         'ocs_at_k_strict',
-        'rs_front',
-        'rs_front@k',
-        'rs_middle',
-        'rs_middle@k',
-        'rs_end',
-        'rs_end@k',
-        'stop_respect_score',
-        'stop_respect_front',
-        'stop_respect_middle',
-        'stop_respect_end',
+        'rs_pre',
+        'rs_pre@k',
+        'rs_mid',
+        'rs_mid@k',
+        'rs_post',
+        'rs_post@k',
+        'over_exec_score',
+        'over_exec_pre',
+        'over_exec_mid',
+        'over_exec_post',
     ):
         if key in summary:
             payload[key] = summary.get(key)
@@ -699,6 +699,7 @@ def _plot_order_drop_stop_vs_full(
     slots = ['front', 'middle', 'end']
     labels = {'front': 'Pre', 'middle': 'Mid', 'end': 'Post'}
     colors = {'front': '#d1495b', 'middle': '#edae49', 'end': '#00798c'}
+    slot_name_map = {'front': 'pre', 'middle': 'mid', 'end': 'post'}
     max_dist = max(max(float(row['dist_to_stop']), float(row['dist_to_full'])) for row in drop_rows)
     axis_max = max(1.0, max_dist * 1.05)
 
@@ -752,7 +753,7 @@ def _plot_order_drop_stop_vs_full(
         ties = sum(1 for row in slot_rows if row['closer_to'] == 'tie')
         summary_rows.append(
             {
-                'order_slot': slot,
+                'order_slot': slot_name_map[slot],
                 'count': total,
                 'closer_to_full_rate': closer_full / total,
                 'closer_to_stop_rate': closer_stop / total,
@@ -809,31 +810,31 @@ def _build_summary(
     if order_group_rows:
         order_stop_rows = [
             row for row in variant_rows
-            if row.get('stop_respect_score') is not None
+            if row.get('over_exec_score') is not None
         ]
         summary['ocs'] = _rate_optional(order_group_rows, 'ocs')
         summary['ocs_at_k'] = _rate_optional(order_group_rows, 'ocs_at_k')
         summary['ocs_strict'] = _rate_optional(order_group_rows, 'ocs_strict')
         summary['ocs_at_k_strict'] = _rate_optional(order_group_rows, 'ocs_at_k_strict')
-        summary['rs_front'] = _safe_mean([float(row.get('mean_rs', 0.0)) for row in instance_rows if str(row.get('order_slot') or '') == 'front'])
-        summary['rs_front@k'] = _rate_optional([row for row in instance_rows if str(row.get('order_slot') or '') == 'front'], 'mean_rs@k')
-        summary['rs_middle'] = _safe_mean([float(row.get('mean_rs', 0.0)) for row in instance_rows if str(row.get('order_slot') or '') == 'middle'])
-        summary['rs_middle@k'] = _rate_optional([row for row in instance_rows if str(row.get('order_slot') or '') == 'middle'], 'mean_rs@k')
-        summary['rs_end'] = _safe_mean([float(row.get('mean_rs', 0.0)) for row in instance_rows if str(row.get('order_slot') or '') == 'end'])
-        summary['rs_end@k'] = _rate_optional([row for row in instance_rows if str(row.get('order_slot') or '') == 'end'], 'mean_rs@k')
-        summary['stop_respect_score'] = _mean_optional([row.get('stop_respect_score') for row in order_stop_rows])
-        summary['stop_respect_front'] = _mean_optional([
-            row.get('stop_respect_score')
+        summary['rs_pre'] = _safe_mean([float(row.get('mean_rs', 0.0)) for row in instance_rows if str(row.get('order_slot') or '') == 'front'])
+        summary['rs_pre@k'] = _rate_optional([row for row in instance_rows if str(row.get('order_slot') or '') == 'front'], 'mean_rs@k')
+        summary['rs_mid'] = _safe_mean([float(row.get('mean_rs', 0.0)) for row in instance_rows if str(row.get('order_slot') or '') == 'middle'])
+        summary['rs_mid@k'] = _rate_optional([row for row in instance_rows if str(row.get('order_slot') or '') == 'middle'], 'mean_rs@k')
+        summary['rs_post'] = _safe_mean([float(row.get('mean_rs', 0.0)) for row in instance_rows if str(row.get('order_slot') or '') == 'end'])
+        summary['rs_post@k'] = _rate_optional([row for row in instance_rows if str(row.get('order_slot') or '') == 'end'], 'mean_rs@k')
+        summary['over_exec_score'] = _mean_optional([row.get('over_exec_score') for row in order_stop_rows])
+        summary['over_exec_pre'] = _mean_optional([
+            row.get('over_exec_score')
             for row in order_stop_rows
             if str(row.get('order_slot') or '') == 'front'
         ])
-        summary['stop_respect_middle'] = _mean_optional([
-            row.get('stop_respect_score')
+        summary['over_exec_mid'] = _mean_optional([
+            row.get('over_exec_score')
             for row in order_stop_rows
             if str(row.get('order_slot') or '') == 'middle'
         ])
-        summary['stop_respect_end'] = _mean_optional([
-            row.get('stop_respect_score')
+        summary['over_exec_post'] = _mean_optional([
+            row.get('over_exec_score')
             for row in order_stop_rows
             if str(row.get('order_slot') or '') == 'end'
         ])
