@@ -27,6 +27,11 @@ API_MODEL_CONFIGS: tuple[ApiModelConfig, ...] = (
         aliases=('gpt-5.4',),
     ),
     ApiModelConfig(
+        'openai.gpt-5.5',
+        'overseas',
+        aliases=('gpt-5.5',),
+    ),
+    ApiModelConfig(
         'openai.gpt-5.4-pro-2026-03-05',
         'overseas',
         input_field='input',
