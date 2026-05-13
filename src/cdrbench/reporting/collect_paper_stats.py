@@ -850,6 +850,201 @@ def _prompt_summary(prompt_root: Path) -> dict[str, Any]:
     }
 
 
+def _word_count(text: str) -> int:
+    return len([part for part in text.replace("\n", " ").split(" ") if part.strip()])
+
+
+def _unique_main_recipe_sequences(rows: list[dict[str, Any]]) -> dict[str, list[str]]:
+    sequences: dict[str, list[str]] = {}
+    for row in rows:
+        variant_id = row.get("recipe_variant_id")
+        if variant_id is None:
+            continue
+        key = str(variant_id)
+        if key in sequences:
+            continue
+        sequence = [str(op_name) for op_name in (row.get("operator_sequence") or []) if str(op_name).strip()]
+        if sequence:
+            sequences[key] = sequence
+    return sequences
+
+
+def _prompt_variant_counts_and_instruction_words(rows: list[dict[str, Any]]) -> tuple[list[int], list[int]]:
+    variant_counts: list[int] = []
+    instruction_word_counts: list[int] = []
+    for row in rows:
+        variants = row.get("prompt_variants")
+        if not isinstance(variants, list):
+            continue
+        variant_counts.append(len(variants))
+        for variant in variants:
+            if not isinstance(variant, dict):
+                continue
+            requirement = str(variant.get("user_requirement") or "").strip()
+            if requirement:
+                instruction_word_counts.append(_word_count(requirement))
+    return variant_counts, instruction_word_counts
+
+
+def _paper_table_stats(track_rows: dict[str, list[dict[str, Any]]], *, unique_operator_count: int) -> dict[str, Any]:
+    main_rows = track_rows["main"]
+    order_rows = track_rows["order_sensitivity"]
+    atomic_rows = track_rows["atomic_ops"]
+    all_rows = main_rows + order_rows + atomic_rows
+    total = len(all_rows)
+
+    input_lengths = [float(row.get("input_length_chars") or 0) for row in all_rows]
+    input_buckets: Counter[str] = Counter(str(row.get("input_length_bucket") or "unknown") for row in all_rows)
+    main_recipe_sequences = _unique_main_recipe_sequences(main_rows)
+    prompt_variant_counts: list[int] = []
+    instruction_word_counts: list[int] = []
+    for rows in track_rows.values():
+        counts, words = _prompt_variant_counts_and_instruction_words(rows)
+        prompt_variant_counts.extend(counts)
+        instruction_word_counts.extend(words)
+
+    recipe_lengths = [len(sequence) for sequence in main_recipe_sequences.values()]
+    if not recipe_lengths:
+        recipe_lengths = [len(row.get("operator_sequence") or []) for row in main_rows if row.get("operator_sequence")]
+
+    def pct(count: int) -> float | None:
+        return round(count / total * 100, 1) if total else None
+
+    stats = {
+        "total_tasks": total,
+        "atomic_tasks": len(atomic_rows),
+        "atomic_tasks_pct": pct(len(atomic_rows)),
+        "compositional_tasks": len(main_rows),
+        "compositional_tasks_pct": pct(len(main_rows)),
+        "order_sensitivity_tasks": len(order_rows),
+        "order_sensitivity_tasks_pct": pct(len(order_rows)),
+        "avg_input_length_chars": _quantiles(input_lengths)["mean"],
+        "median_input_length_chars": _quantiles(input_lengths)["median"],
+        "short_inputs": int(input_buckets.get("short", 0)),
+        "medium_inputs": int(input_buckets.get("medium", 0)),
+        "long_inputs": int(input_buckets.get("long", 0)),
+        "unknown_input_length_buckets": int(input_buckets.get("unknown", 0)),
+        "active_operators_covered": unique_operator_count,
+        "mined_recipe_families": len({str(row.get("recipe_id")) for row in main_rows if row.get("recipe_id") is not None}),
+        "unique_recipes": len(main_recipe_sequences),
+        "avg_recipe_length": _quantiles([float(value) for value in recipe_lengths])["mean"],
+        "avg_prompt_variants_per_sample": _quantiles([float(value) for value in prompt_variant_counts])["mean"],
+        "avg_instruction_words": _quantiles([float(value) for value in instruction_word_counts])["mean"],
+    }
+    return stats
+
+
+def _format_count_pct(count: int, pct: float | None) -> str:
+    if pct is None:
+        return str(count)
+    return f"{count} ({pct:.1f}\\%)"
+
+
+def _format_optional_float(value: Any, digits: int = 1) -> str:
+    if value is None:
+        return "N/A"
+    return f"{float(value):.{digits}f}"
+
+
+def _paper_table_rows(stats: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        {"section": "Total Tasks", "statistic": "Total Tasks", "value": f"{stats['total_tasks']} (100\\%)"},
+        {
+            "section": "Total Tasks",
+            "statistic": "Atomic Tasks",
+            "value": _format_count_pct(stats["atomic_tasks"], stats["atomic_tasks_pct"]),
+        },
+        {
+            "section": "Total Tasks",
+            "statistic": "Compositional Tasks",
+            "value": _format_count_pct(stats["compositional_tasks"], stats["compositional_tasks_pct"]),
+        },
+        {
+            "section": "Total Tasks",
+            "statistic": "Order-Sensitivity Tasks",
+            "value": _format_count_pct(stats["order_sensitivity_tasks"], stats["order_sensitivity_tasks_pct"]),
+        },
+        {
+            "section": "Input Text",
+            "statistic": "Avg. Input Length (chars)",
+            "value": _format_optional_float(stats["avg_input_length_chars"], 1),
+        },
+        {
+            "section": "Input Text",
+            "statistic": "Median Input Length (chars)",
+            "value": _format_optional_float(stats["median_input_length_chars"], 1),
+        },
+        {
+            "section": "Input Text",
+            "statistic": "Short / Medium / Long Inputs",
+            "value": f"{stats['short_inputs']} / {stats['medium_inputs']} / {stats['long_inputs']}",
+        },
+        {
+            "section": "Recipe Library",
+            "statistic": "Active Operators Covered",
+            "value": str(stats["active_operators_covered"]),
+        },
+        {
+            "section": "Recipe Library",
+            "statistic": "Mined Recipe Families",
+            "value": str(stats["mined_recipe_families"]),
+        },
+        {
+            "section": "Recipe Library",
+            "statistic": "Unique Recipes",
+            "value": str(stats["unique_recipes"]),
+        },
+        {
+            "section": "Recipe Library",
+            "statistic": "Avg. Recipe Length",
+            "value": _format_optional_float(stats["avg_recipe_length"], 2),
+        },
+        {
+            "section": "Task Instruction",
+            "statistic": "Avg. Prompt Variants Per Sample",
+            "value": _format_optional_float(stats["avg_prompt_variants_per_sample"], 1).rstrip("0").rstrip("."),
+        },
+        {
+            "section": "Task Instruction",
+            "statistic": "Avg. Instruction Words",
+            "value": _format_optional_float(stats["avg_instruction_words"], 1),
+        },
+    ]
+
+
+def _paper_table_latex(stats: dict[str, Any]) -> str:
+    lines = [
+        r"\begin{table}[t]",
+        r"    \centering",
+        r"    \resizebox{\columnwidth}{!}{%",
+        r"    \begin{tabular}{lr}",
+        r"        \toprule",
+        r"        \textbf{Statistics} & \textbf{Value} \\",
+        r"        \midrule",
+    ]
+    current_section = None
+    for row in _paper_table_rows(stats):
+        section = row["section"]
+        if section != current_section:
+            if current_section is not None:
+                lines.append(r"        \midrule")
+            lines.append(f"        \\textbf{{{section}}} & \\\\")
+            current_section = section
+        lines.append(f"        \\quad {row['statistic']} & {row['value']} \\\\")
+    lines.extend(
+        [
+            r"        \bottomrule",
+            r"    \end{tabular}%",
+            r"    }",
+            r"    \caption{Statistics of CDR-Bench.}",
+            r"    \label{tab:cdrbench-stats}",
+            r"\end{table}",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Collect paper-oriented benchmark statistics and export raw summary tables.")
     parser.add_argument("--benchmark-dir", default="data/benchmark")
@@ -923,6 +1118,11 @@ def main() -> None:
         "benchmark_full_inventory": {key: value for key, value in benchmark_full_inventory.items() if key != "file_rows"},
         "processed_inventory": {key: value for key, value in processed_inventory.items() if key != "file_rows"},
     }
+    paper_stats = _paper_table_stats(
+        track_rows,
+        unique_operator_count=overview["unique_operators_across_tracks"],
+    )
+    overview["paper_table_stats"] = paper_stats
 
     subset_vs_full = None
     if benchmark_full_dir is not None:
@@ -931,6 +1131,9 @@ def main() -> None:
         overview["subset_vs_full"] = subset_vs_full
 
     _write_json(output_dir / "summary.json", overview)
+    _write_json(output_dir / "paper_table_stats.json", paper_stats)
+    _write_csv(output_dir / "paper_table_rows.csv", _paper_table_rows(paper_stats))
+    (output_dir / "paper_table.tex").write_text(_paper_table_latex(paper_stats), encoding="utf-8")
     _write_csv(output_dir / "main_instance_stats.csv", main_rows)
     _write_csv(output_dir / "main_operator_frequency.csv", _safe_counter_records(_flatten_operator_counts(track_rows["main"]), "operator"))
     _write_csv(output_dir / "order_stats.csv", order_rows)
@@ -979,6 +1182,8 @@ def main() -> None:
         _write_csv(output_dir / "subset_vs_full.csv", _flatten_subset_vs_full_rows(subset_vs_full))
 
     print(f"wrote summary -> {output_dir / 'summary.json'}", flush=True)
+    print(f"wrote paper table stats -> {output_dir / 'paper_table_stats.json'}", flush=True)
+    print(f"wrote paper table latex -> {output_dir / 'paper_table.tex'}", flush=True)
     print(f"wrote main stats -> {output_dir / 'main_instance_stats.csv'}", flush=True)
     print(f"wrote order stats -> {output_dir / 'order_stats.csv'}", flush=True)
     print(f"wrote atomic stats -> {output_dir / 'atomic_instance_stats.csv'}", flush=True)
