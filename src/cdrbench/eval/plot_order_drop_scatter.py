@@ -34,6 +34,42 @@ def _resolve_inputs(
     return resolved_scored_variants.parent, resolved_scored_variants
 
 
+def _debug_filter_counts(variant_rows: list[dict[str, Any]]) -> dict[str, int]:
+    counts = {
+        'total_rows': len(variant_rows),
+        'passed_request_and_valid': 0,
+        'track_order_sensitivity': 0,
+        'reference_status_drop': 0,
+        'has_distinct_full_run_reference': 0,
+        'has_both_distances': 0,
+    }
+    for row in variant_rows:
+        if bool(row.get('request_error')) or not bool(row.get('valid_prediction')):
+            continue
+        counts['passed_request_and_valid'] += 1
+
+        if str(row.get('benchmark_track') or '') != 'order_sensitivity':
+            continue
+        counts['track_order_sensitivity'] += 1
+
+        if str(row.get('reference_status') or '').strip().upper() != 'DROP':
+            continue
+        counts['reference_status_drop'] += 1
+
+        reference_text = '' if row.get('reference_text') is None else str(row.get('reference_text'))
+        full_run_text = '' if row.get('reference_text_full_run') is None else str(row.get('reference_text_full_run'))
+        if not full_run_text or reference_text == full_run_text:
+            continue
+        counts['has_distinct_full_run_reference'] += 1
+
+        dist_stop = row.get('edit_distance_prediction_to_reference')
+        dist_full = row.get('edit_distance_prediction_to_full_run_reference')
+        if dist_stop is None or dist_full is None:
+            continue
+        counts['has_both_distances'] += 1
+    return counts
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description='Plot stop-vs-full distance scatter for order DROP cases from scored variant predictions.'
@@ -71,6 +107,26 @@ def main() -> None:
     )
 
     print(f'wrote plot/csv outputs -> {output_dir}', flush=True)
+    debug_counts = _debug_filter_counts(variant_rows)
+    print(
+        'filter_counts: '
+        f"total={debug_counts['total_rows']} "
+        f"valid={debug_counts['passed_request_and_valid']} "
+        f"order_track={debug_counts['track_order_sensitivity']} "
+        f"drop={debug_counts['reference_status_drop']} "
+        f"distinct_full_run={debug_counts['has_distinct_full_run_reference']} "
+        f"with_distances={debug_counts['has_both_distances']}",
+        flush=True,
+    )
+    if debug_counts['has_both_distances'] == 0:
+        print(
+            'No plottable rows found. Most likely causes: '
+            'the file is not from order_sensitivity, '
+            'these rows are not DROP cases, '
+            'reference_text_full_run was not carried into scoring, '
+            'or edit distances were not written for these rows.',
+            flush=True,
+        )
     print(
         'Diagonal y=x means equal distance to stop and full references; '
         'points below the diagonal are closer to full-run, '
