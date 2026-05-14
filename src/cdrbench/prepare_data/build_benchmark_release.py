@@ -37,11 +37,8 @@ RELEASE_FIELD_ORDER = [
     'difficulty_score',
     'difficulty_label',
     'difficulty_grid_cell',
-    'recipe_difficulty_score',
-    'recipe_difficulty_label',
-    'operator_difficulty_sum',
-    'operator_difficulty_mean',
     'recipe_length',
+    'recipe_length_label',
     'operator',
     'operator_kind',
     'operator_sequence',
@@ -172,48 +169,6 @@ def _ordered_row(row: dict[str, Any], *, keep_replay: bool) -> dict[str, Any]:
     return ordered
 
 
-def _safe_float(value: Any) -> float | None:
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def _load_atomic_operator_scores(path: str | None) -> dict[str, float]:
-    if not path:
-        return {}
-    score_path = Path(path).resolve()
-    if not score_path.exists():
-        raise SystemExit(f'missing atomic operator score file: {score_path}')
-
-    rows: list[dict[str, Any]]
-    if score_path.suffix.lower() == '.json':
-        payload = json.loads(score_path.read_text(encoding='utf-8'))
-        rows = payload if isinstance(payload, list) else payload.get('by_operator', []) if isinstance(payload, dict) else []
-    else:
-        with score_path.open('r', encoding='utf-8', newline='') as handle:
-            rows = list(csv.DictReader(handle))
-
-    scores: dict[str, float] = {}
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        operator = str(row.get('operator') or row.get('operator_name') or row.get('op') or '').strip()
-        if not operator:
-            continue
-        value = None
-        for field in ('mean_rs', 'recipe_success_rate', 'rs', 'RS', 'mean_rs@k', 'RS@K', 'RS@3'):
-            value = _safe_float(row.get(field))
-            if value is not None:
-                break
-        if value is None:
-            continue
-        if 1.0 < value <= 100.0:
-            value /= 100.0
-        scores[operator] = max(0.0, min(1.0, value))
-    return scores
-
-
 def _sequence(row: dict[str, Any]) -> list[str]:
     sequence = row.get('operator_sequence')
     if isinstance(sequence, list):
@@ -234,16 +189,16 @@ def _input_length_tier(row: dict[str, Any]) -> str:
     return 'long'
 
 
-def _tertile_label(score: float, low_cut: float, high_cut: float) -> str:
-    if score <= low_cut:
-        return 'easy'
-    if score <= high_cut:
+def _recipe_length_label(length: int) -> str:
+    if length <= 2:
+        return 'short'
+    if length <= 4:
         return 'medium'
-    return 'hard'
+    return 'long'
 
 
-def _task_difficulty_from_grid(recipe_label: str, input_label: str) -> str:
-    recipe_rank = {'easy': 1, 'medium': 2, 'hard': 3}.get(recipe_label, 2)
+def _task_difficulty_from_grid(recipe_length_label: str, input_label: str) -> str:
+    recipe_rank = {'short': 1, 'medium': 2, 'long': 3}.get(recipe_length_label, 2)
     input_rank = {'short': 1, 'medium': 2, 'long': 3}.get(input_label, 2)
     grid_rank = recipe_rank + input_rank
     if grid_rank <= 3:
@@ -253,43 +208,22 @@ def _task_difficulty_from_grid(recipe_label: str, input_label: str) -> str:
     return 'hard'
 
 
-def _attach_difficulty(
-    rows: list[dict[str, Any]],
-    *,
-    atomic_operator_scores: dict[str, float],
-    default_atomic_rs: float,
-) -> list[dict[str, Any]]:
+def _attach_difficulty(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     scored_rows = []
     for row in rows:
         sequence = _sequence(row)
-        op_difficulties = [
-            1.0 - atomic_operator_scores.get(operator, default_atomic_rs)
-            for operator in sequence
-        ]
-        op_sum = sum(op_difficulties)
-        op_mean = op_sum / len(op_difficulties) if op_difficulties else 0.0
-        copied = dict(row)
-        copied['recipe_length'] = len(sequence)
-        copied['operator_difficulty_sum'] = round(op_sum, 6)
-        copied['operator_difficulty_mean'] = round(op_mean, 6)
-        copied['recipe_difficulty_score'] = round(op_sum, 6)
-        scored_rows.append(copied)
-
-    scores = sorted(float(row.get('recipe_difficulty_score', 0.0) or 0.0) for row in scored_rows)
-    if not scores:
-        return scored_rows
-    low_cut = scores[int((len(scores) - 1) / 3)]
-    high_cut = scores[int(2 * (len(scores) - 1) / 3)]
-    for row in scored_rows:
-        recipe_score = float(row.get('recipe_difficulty_score', 0.0) or 0.0)
-        recipe_label = _tertile_label(recipe_score, low_cut, high_cut)
+        recipe_length = len(sequence)
+        recipe_label = _recipe_length_label(recipe_length)
         input_label = _input_length_tier(row)
         task_label = _task_difficulty_from_grid(recipe_label, input_label)
-        row['recipe_difficulty_label'] = recipe_label
-        row['input_length_bucket'] = input_label
-        row['difficulty_grid_cell'] = f'recipe_{recipe_label}__input_{input_label}'
-        row['difficulty_label'] = task_label
-        row['difficulty_score'] = {'easy': 1, 'medium': 2, 'hard': 3}[task_label]
+        copied = dict(row)
+        copied['recipe_length'] = recipe_length
+        copied['recipe_length_label'] = recipe_label
+        copied['input_length_bucket'] = input_label
+        copied['difficulty_grid_cell'] = f'recipe_{recipe_label}__input_{input_label}'
+        copied['difficulty_label'] = task_label
+        copied['difficulty_score'] = {'easy': 1, 'medium': 2, 'hard': 3}[task_label]
+        scored_rows.append(copied)
     return scored_rows
 
 
@@ -308,18 +242,6 @@ def _count_rows(rows: list[dict[str, Any]], fields: list[str]) -> list[dict[str,
     return output
 
 
-def _length_bucket(length: int) -> str:
-    if length <= 1:
-        return '1'
-    if length == 2:
-        return '2'
-    if length == 3:
-        return '3'
-    if length == 4:
-        return '4'
-    return '5+'
-
-
 def _recipe_distribution_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     output = []
     by_recipe: dict[str, list[dict[str, Any]]] = {}
@@ -330,6 +252,7 @@ def _recipe_distribution_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]
         first = bucket[0]
         lengths = [int(row.get('recipe_length', len(_sequence(row))) or 0) for row in bucket]
         scores = [float(row.get('difficulty_score', 0.0) or 0.0) for row in bucket]
+        median_length = sorted(lengths)[len(lengths) // 2] if lengths else 0
         output.append(
             {
                 'recipe_key': recipe_key,
@@ -339,8 +262,8 @@ def _recipe_distribution_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]
                 'recipe_variant_id': first.get('recipe_variant_id'),
                 'order_family_id': first.get('order_family_id'),
                 'count': len(bucket),
-                'recipe_length': int(statistics.median(lengths)) if lengths else 0,
-                'recipe_length_bucket': _length_bucket(int(statistics.median(lengths)) if lengths else 0),
+                'recipe_length': median_length,
+                'recipe_length_label': _recipe_length_label(median_length),
                 'mean_difficulty_score': sum(scores) / len(scores) if scores else 0.0,
             }
         )
@@ -380,14 +303,11 @@ def _write_release_statistics(output_dir: Path, track: str, rows: list[dict[str,
     stats_dir = output_dir / 'stats'
     task_track_rows = _count_rows(rows, ['benchmark_track'])
     task_difficulty_rows = _count_rows(rows, ['difficulty_label'])
-    task_difficulty_grid_rows = _count_rows(rows, ['recipe_difficulty_label', 'input_length_bucket', 'difficulty_label'])
+    task_difficulty_grid_rows = _count_rows(rows, ['recipe_length_label', 'input_length_bucket', 'difficulty_label'])
     task_domain_rows = _count_rows(rows, ['domain'])
     task_domain_difficulty_rows = _count_rows(rows, ['domain', 'difficulty_label'])
-    recipe_difficulty_rows = _count_rows(rows, ['recipe_difficulty_label'])
-    recipe_length_rows = _count_rows(
-        [{**row, 'recipe_length_bucket': _length_bucket(int(row.get('recipe_length', 0) or 0))} for row in rows],
-        ['recipe_length_bucket'],
-    )
+    recipe_length_rows = _count_rows(rows, ['recipe_length'])
+    recipe_length_label_rows = _count_rows(rows, ['recipe_length_label'])
     recipe_family_rows = _count_rows(rows, ['order_family_id']) if track == 'order_sensitivity' else _count_rows(rows, ['recipe_id'])
     prompt_variant_count_rows = _count_rows(rows, ['prompt_variant_count'])
     prompt_style_rows = _prompt_distribution_rows(rows)
@@ -398,8 +318,8 @@ def _write_release_statistics(output_dir: Path, track: str, rows: list[dict[str,
     _write_csv(stats_dir / f'{track}_task_difficulty_grid_distribution.csv', task_difficulty_grid_rows)
     _write_csv(stats_dir / f'{track}_task_domain_distribution.csv', task_domain_rows)
     _write_csv(stats_dir / f'{track}_task_domain_by_difficulty.csv', task_domain_difficulty_rows)
-    _write_csv(stats_dir / f'{track}_recipe_difficulty_distribution.csv', recipe_difficulty_rows)
     _write_csv(stats_dir / f'{track}_recipe_length_distribution.csv', recipe_length_rows)
+    _write_csv(stats_dir / f'{track}_recipe_length_label_distribution.csv', recipe_length_label_rows)
     _write_csv(stats_dir / f'{track}_recipe_group_distribution.csv', recipe_family_rows)
     _write_csv(stats_dir / f'{track}_recipe_distribution.csv', recipe_rows)
     _write_csv(stats_dir / f'{track}_prompt_variant_count_distribution.csv', prompt_variant_count_rows)
@@ -414,8 +334,8 @@ def _write_release_statistics(output_dir: Path, track: str, rows: list[dict[str,
             'domain_by_difficulty': task_domain_difficulty_rows,
         },
         'recipe': {
-            'difficulty_distribution': recipe_difficulty_rows,
             'length_distribution': recipe_length_rows,
+            'length_label_distribution': recipe_length_label_rows,
             'group_distribution': recipe_family_rows,
             'recipe_distribution_count': len(recipe_rows),
         },
@@ -434,21 +354,6 @@ def main() -> None:
     parser.add_argument('--output-root', default='data/benchmark_release')
     parser.add_argument('--tracks', default='atomic_ops,main,order_sensitivity')
     parser.add_argument('--keep-replay', action='store_true', help='Preserve recipe_replay if present in the input rows.')
-    parser.add_argument(
-        '--atomic-operator-score-path',
-        default=None,
-        help=(
-            'Optional CSV/JSON file with per-operator atomic RS. Difficulty uses '
-            'sum(1 - atomic_operator_rs) over the recipe. Missing operators use '
-            '--default-atomic-rs.'
-        ),
-    )
-    parser.add_argument(
-        '--default-atomic-rs',
-        type=float,
-        default=0.5,
-        help='Fallback atomic RS for operators absent from --atomic-operator-score-path.',
-    )
     parser.add_argument('--progress-every', type=int, default=1000)
     args = parser.parse_args()
 
@@ -459,32 +364,22 @@ def main() -> None:
     if unsupported:
         raise SystemExit(f'unsupported tracks: {", ".join(unsupported)}')
 
-    default_atomic_rs = max(0.0, min(1.0, float(args.default_atomic_rs)))
-    atomic_operator_scores = _load_atomic_operator_scores(args.atomic_operator_score_path)
-
     summary: dict[str, Any] = {
         'benchmark_root': str(benchmark_root),
         'output_root': str(output_root),
         'domain_metadata': DOMAIN_METADATA,
         'difficulty_definition': {
             'formula': (
-                'recipe_difficulty_score = operator_difficulty_sum = '
-                'sum(1 - atomic_operator_rs) over recipe operators. '
-                'recipe_difficulty_label is assigned by tertiles within each output split. '
-                'task difficulty is assigned by a 3x3 grid over recipe_difficulty_label '
-                'and input_length_bucket.'
+                'task difficulty is assigned by a 3x3 grid over recipe_length_label '
+                'and input_length_bucket. recipe_length_label is short for <=2 operators, '
+                'medium for 3-4 operators, and long for >=5 operators.'
             ),
             'task_difficulty_grid': {
-                'easy': ['recipe_easy__input_short', 'recipe_easy__input_medium', 'recipe_medium__input_short'],
-                'medium': ['recipe_easy__input_long', 'recipe_medium__input_medium', 'recipe_hard__input_short'],
-                'hard': ['recipe_medium__input_long', 'recipe_hard__input_medium', 'recipe_hard__input_long'],
+                'easy': ['recipe_short__input_short', 'recipe_short__input_medium', 'recipe_medium__input_short'],
+                'medium': ['recipe_short__input_long', 'recipe_medium__input_medium', 'recipe_long__input_short'],
+                'hard': ['recipe_medium__input_long', 'recipe_long__input_medium', 'recipe_long__input_long'],
             },
-            'recipe_labeling': 'easy/medium/hard are recipe-difficulty tertiles within each output split.',
-            'atomic_operator_score_path': str(Path(args.atomic_operator_score_path).resolve())
-            if args.atomic_operator_score_path
-            else None,
-            'num_atomic_operator_scores': len(atomic_operator_scores),
-            'default_atomic_rs': default_atomic_rs,
+            'recipe_length_labeling': {'short': '<=2 operators', 'medium': '3-4 operators', 'long': '>=5 operators'},
         },
         'tracks': {},
     }
@@ -504,11 +399,7 @@ def main() -> None:
             if args.progress_every > 0 and (index % args.progress_every == 0 or index == total_rows):
                 print(f'progress release build track={track} row={index}/{total_rows}', flush=True)
 
-        scored_rows = _attach_difficulty(
-            release_rows,
-            atomic_operator_scores=atomic_operator_scores,
-            default_atomic_rs=default_atomic_rs,
-        )
+        scored_rows = _attach_difficulty(release_rows)
         output_rows = [_ordered_row(row, keep_replay=bool(args.keep_replay)) for row in scored_rows]
         for output_row in output_rows:
             domain = str(output_row.get('domain') or 'unknown')

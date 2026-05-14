@@ -13,9 +13,6 @@ Options:
   --output-root <path>      Default: data/benchmark_release
   --tracks <csv>            Default: atomic_ops,main,order_sensitivity
   --keep-replay             Preserve recipe_replay if present
-  --atomic-operator-score-path <path>
-                           Optional per-operator atomic RS CSV/JSON for difficulty
-  --default-atomic-rs <x>   Fallback atomic RS for missing operators. Default: 0.5
   --progress-every <int>    Default: 1000
   -h, --help                Show help
 EOF
