@@ -285,6 +285,7 @@ def main() -> None:
     parser.add_argument('--domains-config', default='configs/domains.yaml')
     parser.add_argument('--recipe-library-dir', default='data/processed/recipe_library')
     parser.add_argument('--on-mapper-error', choices=('raise', 'keep'), default='raise')
+    parser.add_argument('--progress-every', type=int, default=100)
     args = parser.parse_args()
 
     benchmark_root = (ROOT / args.benchmark_root).resolve()
@@ -306,6 +307,8 @@ def main() -> None:
         rows = _read_jsonl(input_path)
         replayed_rows = []
         status_counts = {'KEEP': 0, 'DROP': 0, 'UNKNOWN': 0}
+        total_rows = len(rows)
+        print(f'start replay track={track} rows={total_rows}', flush=True)
         for index, row in enumerate(rows, start=1):
             try:
                 replayed = _replay_row(
@@ -321,6 +324,12 @@ def main() -> None:
             status = str(replayed.get('recipe_replay', {}).get('status') or 'UNKNOWN')
             status_counts[status if status in status_counts else 'UNKNOWN'] += 1
             replayed_rows.append(replayed)
+            if args.progress_every > 0 and (index % args.progress_every == 0 or index == total_rows):
+                print(
+                    f'progress replay track={track} row={index}/{total_rows} '
+                    f'keep={status_counts["KEEP"]} drop={status_counts["DROP"]} unknown={status_counts["UNKNOWN"]}',
+                    flush=True,
+                )
 
         relative_parent = input_path.parent.relative_to(benchmark_root) if input_path.parent != benchmark_root else Path()
         output_path = output_root / relative_parent / input_path.name

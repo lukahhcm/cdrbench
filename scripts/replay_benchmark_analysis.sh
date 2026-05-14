@@ -15,6 +15,7 @@ Options:
   --domains-config <path>       Default: configs/domains.yaml
   --recipe-library-dir <path>   Default: data/processed/recipe_library
   --on-mapper-error <mode>      raise or keep. Default: raise
+  --progress-every <int>        Default: 100
   -h, --help                    Show help
 EOF
 }
