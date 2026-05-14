@@ -49,7 +49,7 @@ def _write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> int:
     count = 0
     with tmp_path.open('w', encoding='utf-8') as handle:
         for row in rows:
-            handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + '\n')
+            handle.write(json.dumps(row, ensure_ascii=False) + '\n')
             count += 1
     tmp_path.replace(path)
     return count
@@ -109,14 +109,63 @@ def _state_payload(
 ) -> dict[str, Any]:
     return {
         'state_index': state_index,
-        'label': label,
+        'state_label': label,
+        'state_role': 'input' if state_index == 0 else 'intermediate',
         'text': text,
         'text_length_chars': len(text),
-        'produced_by_step_index': produced_by_step_index,
-        'produced_by_operator': produced_by_operator,
-        'produced_by_kind': produced_by_kind,
+        'created_by_step_index': produced_by_step_index,
+        'created_by_operator': produced_by_operator,
+        'created_by_kind': produced_by_kind,
         'edit_distance_to_final': None if final_text is None else _edit_distance(text, final_text),
     }
+
+
+RELEASE_FIELD_ORDER = [
+    'instance_id',
+    'benchmark_track',
+    'domain',
+    'source_domain',
+    'source_record_id',
+    'input_text',
+    'input_length_chars',
+    'input_length_bucket',
+    'operator',
+    'operator_kind',
+    'operator_sequence',
+    'filter_name',
+    'filter_params_by_name',
+    'recipe_id',
+    'recipe_variant_id',
+    'recipe_type',
+    'order_family_id',
+    'order_slot',
+    'order_group_instance_id',
+    'group_success_rule',
+    'reference_status',
+    'reference_text',
+    'reference_text_at_stop',
+    'reference_text_full_run',
+    'reference_trace',
+    'recipe_replay',
+    'recipe_prompt_key',
+    'prompt_source',
+    'prompt_variants',
+    'prompt_variant_count',
+    'prompt_candidate_pool_count',
+    'prompt_sampling_policy',
+    'prompt_sampling_seed',
+    'accepted_candidate_count',
+    'accepted_style_count',
+    'threshold_meta',
+]
+
+
+def _ordered_release_row(row: dict[str, Any]) -> dict[str, Any]:
+    ordered = {key: row[key] for key in RELEASE_FIELD_ORDER if key in row}
+    for key, value in row.items():
+        if key not in ordered:
+            ordered[key] = value
+    return ordered
 
 
 def _replay_row(
@@ -138,7 +187,7 @@ def _replay_row(
     raw_states: list[dict[str, Any]] = [
         {
             'state_index': 0,
-            'label': 't1',
+            'label': 'state_0',
             'text': text,
             'text_length_chars': len(text),
             'produced_by_step_index': None,
@@ -178,7 +227,7 @@ def _replay_row(
             raw_states.append(
                 {
                     'state_index': output_state_index,
-                    'label': f't{output_state_index + 1}',
+                    'label': f'state_{output_state_index}',
                     'text': text,
                     'text_length_chars': len(text),
                     'produced_by_step_index': step_index,
@@ -272,7 +321,7 @@ def _replay_row(
     output['reference_text_full_run'] = final_text
     if stop_text is not None:
         output['reference_text_at_stop'] = stop_text
-    return output
+    return _ordered_release_row(output)
 
 
 def main() -> None:
