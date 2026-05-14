@@ -531,7 +531,7 @@ def _atomic_record(
     row = {
         'instance_id': _stable_id('atomic', op_name, _record_id(record)),
         'benchmark_track': 'atomic',
-        'domain': 'atomic',
+        'domain': source_domain,
         'source_domain': source_domain,
         'operator': op_name,
         'operator_kind': op_kind,
