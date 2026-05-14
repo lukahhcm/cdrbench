@@ -14,6 +14,7 @@ import yaml
 
 from cdrbench.infer.openai_infer import make_api_infer, make_vllm_infer
 from cdrbench.llm_utils import parse_json_response, resolve_api_key, resolve_base_url, resolve_model
+from cdrbench.prepare_data.build_benchmark_release import RELEASE_FIELD_ORDER
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -53,6 +54,13 @@ NON_SCORING_REFUSAL_PATTERNS = (
     re.compile(r'violates? policy', re.IGNORECASE),
     re.compile(r'policy restrictions?', re.IGNORECASE),
 )
+PREDICTION_FIELD_ORDER = [
+    'request_model',
+    'request_base_url',
+    'prompt_mode',
+    'selected_prompt_variant_indices',
+    'variant_predictions',
+]
 
 
 def _stable_json(payload: Any) -> str:
@@ -98,7 +106,7 @@ def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
     tmp_path = path.with_suffix(path.suffix + '.tmp')
     with tmp_path.open('w', encoding='utf-8') as handle:
         for row in rows:
-            handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + '\n')
+            handle.write(json.dumps(_ordered_prediction_row(row), ensure_ascii=False) + '\n')
     tmp_path.replace(path)
 
 
@@ -159,6 +167,20 @@ def _copy_recipe_identity_fields(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _ordered_prediction_row(row: dict[str, Any]) -> dict[str, Any]:
+    ordered: dict[str, Any] = {}
+    for key in RELEASE_FIELD_ORDER:
+        if key in row:
+            ordered[key] = row[key]
+    for key in PREDICTION_FIELD_ORDER:
+        if key in row and key not in ordered:
+            ordered[key] = row[key]
+    for key, value in row.items():
+        if key not in ordered:
+            ordered[key] = value
+    return ordered
+
+
 def _resolved_api_key(explicit_api_key: str | None, base_url: str) -> str:
     if explicit_api_key:
         return explicit_api_key
@@ -196,31 +218,10 @@ def _tagged_output_hint(prompt_cfg: dict[str, Any]) -> str:
 
 
 def _base_inference_row(eval_row: dict[str, Any]) -> dict[str, Any]:
-    keep_fields = [
-        'instance_id',
-        'benchmark_track',
-        'domain',
-        'source_domain',
-        'order_family_id',
-        'order_slot',
-        'order_group_instance_id',
-        'group_success_rule',
-        'operator',
-        'operator_kind',
-        'source_record_id',
-        'input_text',
-        'input_length_chars',
-        'input_length_bucket',
-        'reference_status',
-        'reference_text',
-        'reference_text_full_run',
-        'prompt_variant_count',
-        'prompt_candidate_pool_count',
-        'prompt_sampling_policy',
-        'prompt_sampling_seed',
-    ]
-    output_row = _copy_recipe_identity_fields(eval_row)
-    output_row.update({field: eval_row[field] for field in keep_fields if field in eval_row})
+    output_row = {field: eval_row[field] for field in RELEASE_FIELD_ORDER if field in eval_row}
+    for key, value in _copy_recipe_identity_fields(eval_row).items():
+        if value is not None:
+            output_row.setdefault(key, value)
     recipe_prompt_key = _first_present(eval_row, 'recipe_prompt_key', 'workflow_prompt_key')
     if recipe_prompt_key is not None:
         output_row['recipe_prompt_key'] = recipe_prompt_key

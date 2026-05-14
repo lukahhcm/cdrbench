@@ -15,6 +15,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[3]
 
 from cdrbench.config import load_domains_config
+from cdrbench.canonical_ops import apply_canonical_mapper, has_canonical_mapper
 from cdrbench.dj_operator_loader import Fields, create_operator
 from cdrbench.domain_assignment import build_domain_execution_plan
 
@@ -146,6 +147,15 @@ def _apply_mapper_text(op_name: str, text: str, params: dict[str, Any], suffix: 
             'skipped': 'text_too_long_for_expensive_mapper',
             'output_length': len(text),
             'delta_chars': 0,
+        }
+
+    if has_canonical_mapper(op_name):
+        output_text = apply_canonical_mapper(op_name, text, params, suffix)
+        return output_text, {
+            'active': output_text != text,
+            'canonical_operator': True,
+            'output_length': len(output_text),
+            'delta_chars': len(output_text) - len(text),
         }
 
     op = create_operator(op_name, **params)
