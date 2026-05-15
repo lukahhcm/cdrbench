@@ -14,7 +14,8 @@ Options:
   --predictions-root <path>    Default: data/evaluation
   --tracks <csv>               Default: atomic_ops,main,order_sensitivity
   --model-dirname <name>       Optional: only update one model directory.
-  --predictions-filename <n>   Default: predictions.jsonl
+  --predictions-filename <n>   Optional exact filename to match.
+  --prediction-glob <pattern>  Prediction filename glob. Can repeat. Default: prediction*.jsonl and predictions*.jsonl
   --overwrite                  Overwrite prediction files in place. Default.
   --no-overwrite               Write sibling *.backfilled.jsonl files.
   --references-only            Only update reference_* fields.
@@ -36,7 +37,8 @@ BENCHMARK_ROOT=""
 PREDICTIONS_ROOT="data/evaluation"
 TRACKS_CSV="atomic_ops,main,order_sensitivity"
 MODEL_DIRNAME=""
-PREDICTIONS_FILENAME="predictions.jsonl"
+PREDICTIONS_FILENAME=""
+PREDICTION_GLOBS=()
 OVERWRITE="true"
 REFERENCES_ONLY="false"
 
@@ -76,6 +78,52 @@ resolve_benchmark_path() {
   return 1
 }
 
+find_prediction_files_for_track() {
+  local track="$1"
+  local track_predictions_root="${PREDICTIONS_ROOT}/${track}"
+  local -a roots=()
+  local -a found=()
+
+  if [[ -n "${MODEL_DIRNAME}" ]]; then
+    if [[ -d "${track_predictions_root}/${MODEL_DIRNAME}" ]]; then
+      roots+=("${track_predictions_root}/${MODEL_DIRNAME}")
+    fi
+    if [[ -d "${PREDICTIONS_ROOT}/${MODEL_DIRNAME}" ]]; then
+      roots+=("${PREDICTIONS_ROOT}/${MODEL_DIRNAME}")
+    fi
+  else
+    if [[ -d "${track_predictions_root}" ]]; then
+      roots+=("${track_predictions_root}")
+    fi
+    if [[ -d "${PREDICTIONS_ROOT}" ]]; then
+      roots+=("${PREDICTIONS_ROOT}")
+    fi
+  fi
+
+  if [[ "${#roots[@]}" -eq 0 ]]; then
+    echo "[scan] track=${track} predictions_root_missing=${PREDICTIONS_ROOT}" >&2
+    return 0
+  fi
+
+  for root in "${roots[@]}"; do
+    for glob in "${PREDICTION_GLOBS[@]}"; do
+      while IFS= read -r path; do
+        case "/${path}" in
+          */"${track}"/*)
+            if [[ -z "${MODEL_DIRNAME}" || "/${path}" == */"${MODEL_DIRNAME}"/* ]]; then
+              found+=("${path}")
+            fi
+            ;;
+        esac
+      done < <(find "${root}" -type f -name "${glob}" | sort)
+    done
+  done
+
+  if [[ "${#found[@]}" -gt 0 ]]; then
+    printf '%s\n' "${found[@]}" | awk '!seen[$0]++' | sort
+  fi
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --benchmark-root)
@@ -96,6 +144,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --predictions-filename)
       PREDICTIONS_FILENAME="$2"
+      shift 2
+      ;;
+    --prediction-glob)
+      PREDICTION_GLOBS+=("$2")
       shift 2
       ;;
     --overwrite)
@@ -126,17 +178,18 @@ if [[ -z "${BENCHMARK_ROOT}" ]]; then
   echo "--benchmark-root is required." >&2
   exit 1
 fi
+if [[ -n "${PREDICTIONS_FILENAME}" ]]; then
+  PREDICTION_GLOBS=("${PREDICTIONS_FILENAME}")
+elif [[ "${#PREDICTION_GLOBS[@]}" -eq 0 ]]; then
+  PREDICTION_GLOBS=('prediction*.jsonl' 'predictions*.jsonl')
+fi
 
 IFS=',' read -r -a TRACKS <<< "${TRACKS_CSV}"
 total=0
 for track in "${TRACKS[@]}"; do
   benchmark_path="$(resolve_benchmark_path "${track}")"
-
-  if [[ -n "${MODEL_DIRNAME}" ]]; then
-    prediction_files=("${PREDICTIONS_ROOT}/${track}/${MODEL_DIRNAME}/${PREDICTIONS_FILENAME}")
-  else
-    mapfile -t prediction_files < <(find "${PREDICTIONS_ROOT}/${track}" -mindepth 2 -maxdepth 2 -type f -name "${PREDICTIONS_FILENAME}" | sort)
-  fi
+  mapfile -t prediction_files < <(find_prediction_files_for_track "${track}")
+  echo "[scan] track=${track} benchmark=${benchmark_path} prediction_files=${#prediction_files[@]} globs=${PREDICTION_GLOBS[*]}"
 
   for predictions_path in "${prediction_files[@]}"; do
     if [[ ! -f "${predictions_path}" ]]; then
@@ -159,5 +212,25 @@ for track in "${TRACKS[@]}"; do
     total=$((total + 1))
   done
 done
+
+if [[ "${total}" -eq 0 ]]; then
+  cat >&2 <<EOF
+No prediction files were backfilled.
+
+Expected files like:
+  ${PREDICTIONS_ROOT}/<track>/<model_dirname>/prediction*.jsonl
+
+If your files use a different name pattern, pass:
+  --prediction-glob '<pattern>'
+
+If your evaluation root is different, pass:
+  --predictions-root <path>
+
+Quick checks:
+  find ${PREDICTIONS_ROOT} -name 'predictions*.jsonl' | head
+  find ${PREDICTIONS_ROOT} -name 'prediction*.jsonl' | head
+EOF
+  exit 1
+fi
 
 echo "[complete] backfilled prediction files: ${total}"
