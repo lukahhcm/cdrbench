@@ -40,6 +40,42 @@ PREDICTIONS_FILENAME="predictions.jsonl"
 OVERWRITE="true"
 REFERENCES_ONLY="false"
 
+track_filename() {
+  case "$1" in
+    atomic_ops)
+      printf 'atomic_ops.jsonl'
+      ;;
+    main)
+      printf 'main.jsonl'
+      ;;
+    order_sensitivity)
+      printf 'order_sensitivity.jsonl'
+      ;;
+    *)
+      echo "Unsupported track: $1" >&2
+      return 1
+      ;;
+  esac
+}
+
+resolve_benchmark_path() {
+  local track="$1"
+  local filename
+  filename="$(track_filename "${track}")"
+  local nested="${BENCHMARK_ROOT}/${track}/${filename}"
+  local flat="${BENCHMARK_ROOT}/${filename}"
+  if [[ -f "${nested}" ]]; then
+    printf '%s\n' "${nested}"
+    return 0
+  fi
+  if [[ -f "${flat}" ]]; then
+    printf '%s\n' "${flat}"
+    return 0
+  fi
+  echo "Missing benchmark file for track=${track}: expected ${nested} or ${flat}" >&2
+  return 1
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --benchmark-root)
@@ -94,11 +130,7 @@ fi
 IFS=',' read -r -a TRACKS <<< "${TRACKS_CSV}"
 total=0
 for track in "${TRACKS[@]}"; do
-  benchmark_path="${BENCHMARK_ROOT}/${track}.jsonl"
-  if [[ ! -f "${benchmark_path}" ]]; then
-    echo "Missing benchmark file for track=${track}: ${benchmark_path}" >&2
-    exit 1
-  fi
+  benchmark_path="$(resolve_benchmark_path "${track}")"
 
   if [[ -n "${MODEL_DIRNAME}" ]]; then
     prediction_files=("${PREDICTIONS_ROOT}/${track}/${MODEL_DIRNAME}/${PREDICTIONS_FILENAME}")
