@@ -796,6 +796,11 @@ def main() -> None:
     parser.add_argument('--progress-every', type=int, default=DEFAULT_PROGRESS_EVERY)
     parser.add_argument('--stop-on-parse-error', action='store_true')
     parser.add_argument('--resume', action='store_true')
+    parser.add_argument(
+        '--resume-only-existing-rows',
+        action='store_true',
+        help='When resuming, restrict inference to instance_ids already present in the existing output file.',
+    )
     args = parser.parse_args()
 
     eval_path = Path(args.eval_path).resolve()
@@ -837,6 +842,27 @@ def main() -> None:
             instance_id = str(row.get('instance_id') or '')
             if instance_id:
                 existing_rows_by_id[instance_id] = row
+    if args.resume_only_existing_rows:
+        if not args.resume:
+            raise SystemExit('--resume-only-existing-rows requires --resume.')
+        if not output_path.exists():
+            raise SystemExit(
+                '--resume-only-existing-rows requires an existing output file; '
+                f'predictions file not found: {output_path}'
+            )
+        existing_instance_ids = set(existing_rows_by_id)
+        if not existing_instance_ids:
+            raise SystemExit(
+                '--resume-only-existing-rows requires at least one existing prediction row; '
+                f'no instance_ids found in {output_path}'
+            )
+        original_row_count = len(rows)
+        rows = [row for row in rows if str(row.get('instance_id') or '') in existing_instance_ids]
+        print(
+            f'resume scope limited to existing predictions rows={len(rows)}/{original_row_count} '
+            f'output_path={output_path}',
+            flush=True,
+        )
 
     output_rows = []
     variant_jobs: list[tuple[int, dict[str, Any], int, dict[str, Any], dict[int, dict[str, Any]], list[int]]] = []

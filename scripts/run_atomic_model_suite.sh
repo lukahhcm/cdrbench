@@ -46,7 +46,7 @@ cd "$REPO_ROOT"
 # Keep atomic_ops for the first sweep; add main later if needed.
 TRACKS="atomic_ops"
 
-EVAL_ROOT="${EVAL_ROOT:-data/benchmark}"
+EVAL_ROOT="${EVAL_ROOT:-data/benchmark_release}"
 
 # Output root. The script will create one subdirectory per track and model slug.
 INFERENCE_ROOT="${INFERENCE_ROOT:-data/evaluation}"

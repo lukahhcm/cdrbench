@@ -16,7 +16,7 @@ By default this script targets all three benchmark tracks:
 It stores raw model outputs so metrics can be recomputed later without rerunning inference.
 
 Options:
-  --eval-root <path>                   Benchmark root. Default: data/benchmark
+  --eval-root <path>                   Benchmark root. Default: data/benchmark_release
   --output-root <path>                 Output root. Default: data/evaluation
   --model-dirname <name>               Model subdirectory name. Required
   --predictions-filename <name>        Predictions filename per track. Default: predictions.jsonl
@@ -37,6 +37,7 @@ Options:
   --concurrency <int>                  Request concurrency. Default: 1
   --progress-every <int>               Default: 20
   --resume                             Resume missing prompt variants from existing outputs
+  --resume-only-existing-rows          When resuming, never infer brand-new instance_ids absent from the existing output file
   --no-resume                          Disable resume even if a wrapper defaults it on
   -h, --help                           Show this help
 
@@ -66,7 +67,7 @@ if [[ ! -x "$PYTHON_BIN" ]]; then
   PYTHON_BIN="python3"
 fi
 
-EVAL_ROOT="data/benchmark"
+EVAL_ROOT="data/benchmark_release"
 OUTPUT_ROOT="data/evaluation"
 MODEL_DIRNAME=""
 PREDICTIONS_FILENAME="predictions.jsonl"
@@ -87,6 +88,7 @@ MAX_TOKENS="0"
 CONCURRENCY="4"
 PROGRESS_EVERY="20"
 RESUME="false"
+RESUME_ONLY_EXISTING_ROWS="false"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -174,6 +176,10 @@ while [[ $# -gt 0 ]]; do
       RESUME="true"
       shift 1
       ;;
+    --resume-only-existing-rows)
+      RESUME_ONLY_EXISTING_ROWS="true"
+      shift 1
+      ;;
     --no-resume)
       RESUME="false"
       shift 1
@@ -259,6 +265,9 @@ for track in "${TRACKS[@]}"; do
   fi
   if [[ "$RESUME" == "true" ]]; then
     cmd+=(--resume)
+  fi
+  if [[ "$RESUME_ONLY_EXISTING_ROWS" == "true" ]]; then
+    cmd+=(--resume-only-existing-rows)
   fi
 
   echo "[run] track=$track step=infer output_dir=$output_dir"

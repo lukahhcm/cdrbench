@@ -6,7 +6,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 cd "${REPO_ROOT}"
 
 TRACKS="${TRACKS:-atomic_ops,main,order_sensitivity}"
-EVAL_ROOT="${EVAL_ROOT:-data/benchmark}"
+EVAL_ROOT="${EVAL_ROOT:-data/benchmark_release}"
 MODEL="${MODEL:-vertex_ai.gemini-3.1-pro-preview}"
 PROMPT_API_KEY="${PROMPT_API_KEY:-true}"
 API_KEY="${API_KEY:-}"

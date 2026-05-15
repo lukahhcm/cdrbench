@@ -21,9 +21,10 @@ Prompt modes:
   state_aware
 
 Configuration is provided by environment variables from thin model wrappers.
-Preferred wrapper inputs:
+  Preferred wrapper inputs:
   EVALUATION_ROOT   Final root for per-track evaluation outputs. Default: data/evaluation
   MODEL_SLUG        Directory name under each track, for example glm_5 or gpt_5_4
+  RESUME_ONLY_EXISTING_ROWS  When true, resume only over instance_ids already present in predictions
 
 Compatibility note:
   OUTPUT_ROOT is still accepted for older wrappers. Legacy values such as
@@ -105,7 +106,7 @@ case "${MODE}" in
 esac
 
 TRACKS="${TRACKS:-atomic_ops,main,order_sensitivity}"
-EVAL_ROOT="${EVAL_ROOT:-data/benchmark}"
+EVAL_ROOT="${EVAL_ROOT:-data/benchmark_release}"
 MODEL="${MODEL:-}"
 BASE_URL="${BASE_URL:-}"
 API_KEY="${API_KEY:-}"
@@ -128,6 +129,7 @@ MAX_TOKENS="${MAX_TOKENS:-0}"
 CONCURRENCY="${CONCURRENCY:-4}"
 PROGRESS_EVERY="${PROGRESS_EVERY:-20}"
 RESUME="${RESUME:-true}"
+RESUME_ONLY_EXISTING_ROWS="${RESUME_ONLY_EXISTING_ROWS:-false}"
 
 sanitize_model_dirname() {
   local value="$1"
@@ -262,6 +264,9 @@ EOF
   fi
   if [[ "${RESUME}" == "true" ]]; then
     cmd+=(--resume)
+  fi
+  if [[ "${RESUME_ONLY_EXISTING_ROWS}" == "true" ]]; then
+    cmd+=(--resume-only-existing-rows)
   fi
   if [[ $# -gt 0 ]]; then
     cmd+=("$@")

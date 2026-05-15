@@ -6,7 +6,7 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 cd "${REPO_ROOT}"
 
 TRACKS="${TRACKS:-atomic_ops,main,order_sensitivity}"
-EVAL_ROOT="${EVAL_ROOT:-data/benchmark}"
+EVAL_ROOT="${EVAL_ROOT:-data/benchmark_release}"
 MODEL="${MODEL:-qwen3_5_9b}"
 BASE_URL="${BASE_URL:-http://127.0.0.1:8904/v1}"
 API_KEY="${API_KEY:-EMPTY}"
