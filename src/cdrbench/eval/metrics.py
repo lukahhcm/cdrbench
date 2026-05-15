@@ -5,7 +5,11 @@ from typing import Any
 
 import editdistance
 
-STOP_AWARE_RG_EPSILON = 1e-6
+RG_EPSILON = 1e-6
+
+
+def _clip_01(value: float) -> float:
+    return min(1.0, max(0.0, value))
 
 
 def normalize_status(value: Any) -> str:
@@ -65,17 +69,25 @@ def compute_recipe_metrics(
     norm_recipe_success = status_match and norm_text_exact_match
 
     d_input = edit_distance(raw_input, raw_reference)
+    d_input_pred = edit_distance(raw_input, raw_prediction)
     d_pred_stop = edit_distance(raw_prediction, raw_reference)
-    denominator = d_input + d_pred_stop + STOP_AWARE_RG_EPSILON
     d_pred_full = (
         edit_distance(raw_prediction, raw_reference_full_run)
         if normalized_reference_status == 'DROP' and raw_reference_full_run
         else None
     )
-    # Base RG is a 0-1 progress score: perfect no-op preservation and perfect
-    # refinement both receive 1, while moving farther from the gold reference
-    # smoothly approaches 0.
-    refinement_gain = 1.0 - (float(d_pred_stop) / denominator)
+
+    if d_input == 0:
+        refinement_progress = 1.0 if d_pred_stop == 0 else 0.0
+    else:
+        refinement_progress = _clip_01(1.0 - (float(d_pred_stop) / float(d_input)))
+    edit_calibration_denominator = max(float(d_input_pred), float(d_input), 1.0)
+    edit_calibration = _clip_01(
+        1.0 - (abs(float(d_input_pred) - float(d_input)) / edit_calibration_denominator)
+    )
+    # RG rewards outputs that both move toward the deterministic reference and
+    # make a comparable amount of editing to the gold transformation.
+    refinement_gain = refinement_progress * edit_calibration if status_match else 0.0
 
     return {
         'normalized_reference_status': normalized_reference_status,
@@ -93,9 +105,12 @@ def compute_recipe_metrics(
         'norm_recipe_success': norm_recipe_success,
         'text_match': text_exact_match,
         'edit_distance_input_to_reference': d_input,
+        'edit_distance_input_to_prediction': d_input_pred,
         'edit_distance_prediction_to_reference': d_pred_stop,
         'edit_distance_prediction_to_full_run_reference': d_pred_full,
         'reference_text_full_run': raw_reference_full_run,
-        'stop_aware_rg_epsilon': STOP_AWARE_RG_EPSILON,
+        'rg_epsilon': RG_EPSILON,
+        'refinement_progress': refinement_progress,
+        'edit_calibration': edit_calibration,
         'refinement_gain': refinement_gain,
     }

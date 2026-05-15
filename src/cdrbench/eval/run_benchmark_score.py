@@ -223,6 +223,18 @@ def _first_non_empty_str(*values: Any) -> str | None:
     return None
 
 
+def _canonical_order_slot(value: Any) -> str:
+    slot = str(value or '').strip().lower()
+    return {
+        'front': 'pre',
+        'pre': 'pre',
+        'middle': 'mid',
+        'mid': 'mid',
+        'end': 'post',
+        'post': 'post',
+    }.get(slot, slot)
+
+
 def _track_name_from_predictions_path(path: Path) -> str:
     if path.stem == 'predictions' and path.parent.name:
         return path.parent.name
@@ -316,35 +328,30 @@ def _score_variant(prediction_row: dict[str, Any], variant_prediction: dict[str,
                 'norm_recipe_success': False,
                 'text_match': False,
                 'edit_distance_input_to_reference': None,
+                'edit_distance_input_to_prediction': None,
                 'edit_distance_prediction_to_reference': None,
                 'edit_distance_prediction_to_full_run_reference': None,
                 'reference_text_full_run': '' if prediction_row.get('reference_text_full_run') is None else str(prediction_row.get('reference_text_full_run')),
-                'stop_aware_rg_lambda': None,
-                'stop_aware_rg_epsilon': None,
+                'rg_epsilon': None,
+                'refinement_progress': None,
+                'edit_calibration': None,
                 'refinement_gain': None,
             }
         )
-    over_exec_score = None
     dist_stop = scored.get('edit_distance_prediction_to_reference')
     dist_full = scored.get('edit_distance_prediction_to_full_run_reference')
-    reference_text = '' if prediction_row.get('reference_text') is None else str(prediction_row.get('reference_text'))
-    reference_text_full_run = '' if prediction_row.get('reference_text_full_run') is None else str(prediction_row.get('reference_text_full_run'))
-    if (
-        valid_prediction
-        and str(prediction_row.get('benchmark_track') or '') == 'order_sensitivity'
-        and str(prediction_row.get('reference_status') or '').strip().upper() == 'DROP'
-        and reference_text_full_run
-        and reference_text != reference_text_full_run
-        and dist_stop is not None
-        and dist_full is not None
-    ):
+    drop_reference_affinity = None
+    if dist_stop is not None and dist_full is not None:
         try:
-            over_exec_score = 1.0 - (
-                float(dist_full)
-                / (float(dist_stop) + float(dist_full) + 1e-6)
+            dist_stop_f = float(dist_stop)
+            dist_full_f = float(dist_full)
+            drop_reference_affinity = (
+                'stop'
+                if dist_stop_f < dist_full_f
+                else ('full' if dist_full_f < dist_stop_f else 'tie')
             )
-        except (TypeError, ValueError, ZeroDivisionError):
-            over_exec_score = None
+        except (TypeError, ValueError):
+            drop_reference_affinity = None
     scored.update(
         {
             'prompt_variant_index': int(variant_prediction.get('prompt_variant_index', 0) or 0),
@@ -362,7 +369,7 @@ def _score_variant(prediction_row: dict[str, Any], variant_prediction: dict[str,
             'incomplete_tag_error': _is_incomplete_tag_error(prediction_error),
             'request_error': _is_request_error(prediction_error),
             'response_usage': variant_prediction.get('response_usage'),
-            'over_exec_score': over_exec_score,
+            'drop_reference_affinity': drop_reference_affinity,
         }
     )
     return scored
@@ -423,6 +430,8 @@ def _aggregate_instance_metrics(
     strict_recipe_success_sampled_values = [1.0 if bool(row.get('recipe_success')) else 0.0 for row in sampled_request_ok_rows]
     normalized_recipe_success_sampled_values = [1.0 if bool(row.get('norm_recipe_success')) else 0.0 for row in sampled_request_ok_rows]
     refinement_gain_values = [row.get('refinement_gain') for row in request_ok_rows]
+    refinement_progress_values = [row.get('refinement_progress') for row in request_ok_rows]
+    edit_calibration_values = [row.get('edit_calibration') for row in request_ok_rows]
     prompt_variant_metrics = []
     strict_recipe_success_by_index: dict[int, bool | None] = {}
     normalized_recipe_success_by_index: dict[int, bool | None] = {}
@@ -441,6 +450,8 @@ def _aggregate_instance_metrics(
                 'text_exact_match_strict': bool(row.get('text_exact_match')),
                 'text_exact_match_norm': bool(row.get('norm_text_exact_match')),
                 'refinement_gain': None if row.get('refinement_gain') is None else float(row.get('refinement_gain', 0.0)),
+                'refinement_progress': None if row.get('refinement_progress') is None else float(row.get('refinement_progress', 0.0)),
+                'edit_calibration': None if row.get('edit_calibration') is None else float(row.get('edit_calibration', 0.0)),
                 'prediction_error': row.get('prediction_error'),
                 'format_instability_error': bool(row.get('format_instability_error')),
                 'incomplete_tag_error': bool(row.get('incomplete_tag_error')),
@@ -462,6 +473,8 @@ def _aggregate_instance_metrics(
             'mean_rs_strict': _mean_optional(strict_recipe_success_values),
             'mean_rs_strict@k': (any(strict_recipe_success_sampled_values) if sampled_request_ok_rows else None),
             'mean_rg': _mean_optional(refinement_gain_values),
+            'mean_refinement_progress': _mean_optional(refinement_progress_values),
+            'mean_edit_calibration': _mean_optional(edit_calibration_values),
             'num_valid_rg_variants': sum(1 for value in refinement_gain_values if value is not None),
             'num_invalid_variants': sum(1 for row in variant_rows if not bool(row.get('valid_prediction'))),
             'num_format_error_variants': sum(1 for row in variant_rows if bool(row.get('format_instability_error'))),
@@ -472,9 +485,6 @@ def _aggregate_instance_metrics(
             'recipe_success_prompt0_strict': strict_recipe_success_by_index.get(0),
         }
     )
-    if sample_size == 3:
-        instance_row['mean_rs@3'] = instance_row['mean_rs@k']
-        instance_row['mean_rs_strict@3'] = instance_row['mean_rs_strict@k']
     return instance_row
 
 
@@ -519,6 +529,8 @@ def _instance_slice_summary(rows: list[dict[str, Any]], key: str) -> list[dict[s
             'mean_rs@k': _rate_optional(bucket, 'mean_rs@k'),
             'mean_rs_strict@k': _rate_optional(bucket, 'mean_rs_strict@k'),
             'mean_rg': _mean_optional([item.get('mean_rg') for item in bucket]),
+            'mean_refinement_progress': _mean_optional([item.get('mean_refinement_progress') for item in bucket]),
+            'mean_edit_calibration': _mean_optional([item.get('mean_edit_calibration') for item in bucket]),
         }
         for value, bucket in sorted(grouped.items())
     ]
@@ -559,6 +571,8 @@ def _variant_slice_summary(rows: list[dict[str, Any]], key: str) -> list[dict[st
             'exact_text_match_rate': _rate(bucket, 'norm_text_exact_match'),
             'exact_text_match_rate_strict': _rate(bucket, 'text_exact_match'),
             'avg_refinement_gain': _mean_optional([row.get('refinement_gain') for row in bucket]),
+            'avg_refinement_progress': _mean_optional([row.get('refinement_progress') for row in bucket]),
+            'avg_edit_calibration': _mean_optional([row.get('edit_calibration') for row in bucket]),
             'valid_prediction_rate': _rate(bucket, 'valid_prediction'),
             'format_error_rate': _rate(bucket, 'format_instability_error'),
             'incomplete_tag_error_rate': _rate(bucket, 'incomplete_tag_error'),
@@ -580,6 +594,8 @@ def _summary_report_text(summary: dict[str, Any]) -> str:
     parts.append(f"mean_rs@k={float(summary.get('mean_rs@k', 0.0)):.4f}")
     parts.append(f"mean_rs_strict@k={float(summary.get('mean_rs_strict@k', 0.0)):.4f}")
     parts.append(f"mean_rg={float(summary.get('mean_rg', 0.0)):.4f}")
+    parts.append(f"mean_refinement_progress={float(summary.get('mean_refinement_progress', 0.0)):.4f}")
+    parts.append(f"mean_edit_calibration={float(summary.get('mean_edit_calibration', 0.0)):.4f}")
     parts.append(f"valid_prediction_rate={float(summary.get('valid_prediction_rate', 0.0)):.4f}")
     parts.append(f"empty_response_rate={float(summary.get('empty_response_rate', 0.0)):.4f}")
     parts.append(f"format_error_rate={float(summary.get('format_error_rate', 0.0)):.4f}")
@@ -593,9 +609,27 @@ def _summary_report_text(summary: dict[str, Any]) -> str:
     for key in ('rs_pre', 'rs_pre@k', 'rs_mid', 'rs_mid@k', 'rs_post', 'rs_post@k'):
         if key in summary:
             parts.append(f"{key}={float(summary.get(key, 0.0)):.4f}")
-    for key in ('over_exec_score', 'over_exec_pre', 'over_exec_mid', 'over_exec_post'):
+    for key in (
+        'drop_affinity_count',
+        'drop_full_run_closer_rate',
+        'drop_stop_closer_rate',
+        'drop_tie_rate',
+        'drop_full_run_closer_pre',
+        'drop_stop_closer_pre',
+        'drop_tie_pre',
+        'drop_full_run_closer_mid',
+        'drop_stop_closer_mid',
+        'drop_tie_mid',
+        'drop_full_run_closer_post',
+        'drop_stop_closer_post',
+        'drop_tie_post',
+    ):
         if key in summary:
-            parts.append(f"{key}={float(summary.get(key, 0.0)):.4f}")
+            value = summary.get(key, 0.0)
+            if key == 'drop_affinity_count':
+                parts.append(f"{key}={int(value or 0)}")
+            else:
+                parts.append(f"{key}={float(value):.4f}")
     return ' '.join(parts)
 
 
@@ -611,15 +645,14 @@ def _paper_metrics_payload(summary: dict[str, Any]) -> dict[str, Any]:
         'mean_rs@k': summary.get('mean_rs@k'),
         'mean_rs_strict@k': summary.get('mean_rs_strict@k'),
         'mean_rg': summary.get('mean_rg'),
+        'mean_refinement_progress': summary.get('mean_refinement_progress'),
+        'mean_edit_calibration': summary.get('mean_edit_calibration'),
         'valid_prediction_rate': summary.get('valid_prediction_rate'),
         'empty_response_rate': summary.get('empty_response_rate'),
         'format_error_rate': summary.get('format_error_rate'),
         'incomplete_tag_error_rate': summary.get('incomplete_tag_error_rate'),
         'request_error_rate': summary.get('request_error_rate'),
     }
-    if int(summary.get('prompt_variant_sample_size', 0) or 0) == 3:
-        payload['mean_rs@3'] = summary.get('mean_rs@k')
-        payload['mean_rs_strict@3'] = summary.get('mean_rs_strict@k')
     for key in (
         'ocs',
         'ocs_at_k',
@@ -631,10 +664,19 @@ def _paper_metrics_payload(summary: dict[str, Any]) -> dict[str, Any]:
         'rs_mid@k',
         'rs_post',
         'rs_post@k',
-        'over_exec_score',
-        'over_exec_pre',
-        'over_exec_mid',
-        'over_exec_post',
+        'drop_affinity_count',
+        'drop_full_run_closer_rate',
+        'drop_stop_closer_rate',
+        'drop_tie_rate',
+        'drop_full_run_closer_pre',
+        'drop_stop_closer_pre',
+        'drop_tie_pre',
+        'drop_full_run_closer_mid',
+        'drop_stop_closer_mid',
+        'drop_tie_mid',
+        'drop_full_run_closer_post',
+        'drop_stop_closer_post',
+        'drop_tie_post',
     ):
         if key in summary:
             payload[key] = summary.get(key)
@@ -667,7 +709,7 @@ def _order_drop_distance_rows(variant_rows: list[dict[str, Any]]) -> list[dict[s
             {
                 'instance_id': row.get('instance_id'),
                 'order_group_instance_id': row.get('order_group_instance_id'),
-                'order_slot': row.get('order_slot'),
+                'order_slot': _canonical_order_slot(row.get('order_slot')),
                 'prompt_variant_index': row.get('prompt_variant_index'),
                 'prompt_style_id': row.get('prompt_style_id'),
                 'domain': row.get('domain'),
@@ -685,6 +727,45 @@ def _order_drop_distance_rows(variant_rows: list[dict[str, Any]]) -> list[dict[s
     return rows
 
 
+def _drop_affinity_rates(rows: list[dict[str, Any]]) -> dict[str, float | int]:
+    total = len(rows)
+    if total == 0:
+        return {
+            'count': 0,
+            'full_run_closer_rate': 0.0,
+            'stop_closer_rate': 0.0,
+            'tie_rate': 0.0,
+        }
+    full_run = sum(1 for row in rows if row.get('closer_to') == 'full')
+    stop = sum(1 for row in rows if row.get('closer_to') == 'stop')
+    ties = sum(1 for row in rows if row.get('closer_to') == 'tie')
+    return {
+        'count': total,
+        'full_run_closer_rate': full_run / total,
+        'stop_closer_rate': stop / total,
+        'tie_rate': ties / total,
+    }
+
+
+def _drop_affinity_summary(variant_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    drop_rows = _order_drop_distance_rows(variant_rows)
+    overall = _drop_affinity_rates(drop_rows)
+    summary: dict[str, Any] = {
+        'drop_affinity_count': overall['count'],
+        'drop_full_run_closer_rate': overall['full_run_closer_rate'],
+        'drop_stop_closer_rate': overall['stop_closer_rate'],
+        'drop_tie_rate': overall['tie_rate'],
+    }
+    for slot in ('pre', 'mid', 'post'):
+        slot_rates = _drop_affinity_rates(
+            [row for row in drop_rows if _canonical_order_slot(row.get('order_slot')) == slot]
+        )
+        summary[f'drop_full_run_closer_{slot}'] = slot_rates['full_run_closer_rate']
+        summary[f'drop_stop_closer_{slot}'] = slot_rates['stop_closer_rate']
+        summary[f'drop_tie_{slot}'] = slot_rates['tie_rate']
+    return summary
+
+
 def _plot_order_drop_stop_vs_full(
     *,
     output_dir: Path,
@@ -696,10 +777,9 @@ def _plot_order_drop_stop_vs_full(
     if not drop_rows:
         return
 
-    slots = ['front', 'middle', 'end']
-    labels = {'front': 'Pre', 'middle': 'Mid', 'end': 'Post'}
-    colors = {'front': '#d1495b', 'middle': '#edae49', 'end': '#00798c'}
-    slot_name_map = {'front': 'pre', 'middle': 'mid', 'end': 'post'}
+    slots = ['pre', 'mid', 'post']
+    labels = {'pre': 'Pre', 'mid': 'Mid', 'post': 'Post'}
+    colors = {'pre': '#d1495b', 'mid': '#edae49', 'post': '#00798c'}
     max_dist = max(max(float(row['dist_to_stop']), float(row['dist_to_full'])) for row in drop_rows)
     axis_max = max(1.0, max_dist * 1.05)
 
@@ -753,7 +833,7 @@ def _plot_order_drop_stop_vs_full(
         ties = sum(1 for row in slot_rows if row['closer_to'] == 'tie')
         summary_rows.append(
             {
-                'order_slot': slot_name_map[slot],
+                'order_slot': slot,
                 'count': total,
                 'closer_to_full_rate': closer_full / total,
                 'closer_to_stop_rate': closer_stop / total,
@@ -777,6 +857,16 @@ def _build_summary(
 ) -> dict[str, Any]:
     domain_metadata = _load_domain_metadata()
     mean_rg_values = [row.get('mean_rg') for row in instance_rows if int(row.get('num_valid_rg_variants', 0) or 0) > 0]
+    mean_refinement_progress_values = [
+        row.get('mean_refinement_progress')
+        for row in instance_rows
+        if int(row.get('num_valid_rg_variants', 0) or 0) > 0
+    ]
+    mean_edit_calibration_values = [
+        row.get('mean_edit_calibration')
+        for row in instance_rows
+        if int(row.get('num_valid_rg_variants', 0) or 0) > 0
+    ]
     by_domain = _attach_domain_metadata(_instance_slice_summary(instance_rows, 'domain'), key='domain', metadata=domain_metadata)
     by_source_domain = _instance_slice_summary(instance_rows, 'source_domain')
     summary = {
@@ -792,6 +882,8 @@ def _build_summary(
         'mean_rs@k': _rate_optional(instance_rows, 'mean_rs@k'),
         'mean_rs_strict@k': _rate_optional(instance_rows, 'mean_rs_strict@k'),
         'mean_rg': _mean_optional(mean_rg_values),
+        'mean_refinement_progress': _mean_optional(mean_refinement_progress_values),
+        'mean_edit_calibration': _mean_optional(mean_edit_calibration_values),
         'median_rg': _safe_median([float(value) for value in mean_rg_values if value is not None]),
         'valid_prediction_rate': _rate(variant_rows, 'valid_prediction'),
         'empty_response_rate': _safe_mean([1.0 if str(row.get('prediction_error') or '') == 'empty_response' else 0.0 for row in variant_rows]),
@@ -804,40 +896,21 @@ def _build_summary(
         'by_reference_status': _instance_slice_summary(instance_rows, 'reference_status'),
         'per_prompt_variant': _variant_slice_summary(variant_rows, 'prompt_variant_index'),
     }
-    if sample_size == 3:
-        summary['mean_rs@3'] = summary['mean_rs@k']
-        summary['mean_rs_strict@3'] = summary['mean_rs_strict@k']
     if order_group_rows:
-        order_stop_rows = [
-            row for row in variant_rows
-            if row.get('over_exec_score') is not None
-        ]
         summary['ocs'] = _rate_optional(order_group_rows, 'ocs')
         summary['ocs_at_k'] = _rate_optional(order_group_rows, 'ocs_at_k')
         summary['ocs_strict'] = _rate_optional(order_group_rows, 'ocs_strict')
         summary['ocs_at_k_strict'] = _rate_optional(order_group_rows, 'ocs_at_k_strict')
-        summary['rs_pre'] = _safe_mean([float(row.get('mean_rs', 0.0)) for row in instance_rows if str(row.get('order_slot') or '') == 'front'])
-        summary['rs_pre@k'] = _rate_optional([row for row in instance_rows if str(row.get('order_slot') or '') == 'front'], 'mean_rs@k')
-        summary['rs_mid'] = _safe_mean([float(row.get('mean_rs', 0.0)) for row in instance_rows if str(row.get('order_slot') or '') == 'middle'])
-        summary['rs_mid@k'] = _rate_optional([row for row in instance_rows if str(row.get('order_slot') or '') == 'middle'], 'mean_rs@k')
-        summary['rs_post'] = _safe_mean([float(row.get('mean_rs', 0.0)) for row in instance_rows if str(row.get('order_slot') or '') == 'end'])
-        summary['rs_post@k'] = _rate_optional([row for row in instance_rows if str(row.get('order_slot') or '') == 'end'], 'mean_rs@k')
-        summary['over_exec_score'] = _mean_optional([row.get('over_exec_score') for row in order_stop_rows])
-        summary['over_exec_pre'] = _mean_optional([
-            row.get('over_exec_score')
-            for row in order_stop_rows
-            if str(row.get('order_slot') or '') == 'front'
-        ])
-        summary['over_exec_mid'] = _mean_optional([
-            row.get('over_exec_score')
-            for row in order_stop_rows
-            if str(row.get('order_slot') or '') == 'middle'
-        ])
-        summary['over_exec_post'] = _mean_optional([
-            row.get('over_exec_score')
-            for row in order_stop_rows
-            if str(row.get('order_slot') or '') == 'end'
-        ])
+        pre_rows = [row for row in instance_rows if _canonical_order_slot(row.get('order_slot')) == 'pre']
+        mid_rows = [row for row in instance_rows if _canonical_order_slot(row.get('order_slot')) == 'mid']
+        post_rows = [row for row in instance_rows if _canonical_order_slot(row.get('order_slot')) == 'post']
+        summary['rs_pre'] = _safe_mean([float(row.get('mean_rs', 0.0)) for row in pre_rows])
+        summary['rs_pre@k'] = _rate_optional(pre_rows, 'mean_rs@k')
+        summary['rs_mid'] = _safe_mean([float(row.get('mean_rs', 0.0)) for row in mid_rows])
+        summary['rs_mid@k'] = _rate_optional(mid_rows, 'mean_rs@k')
+        summary['rs_post'] = _safe_mean([float(row.get('mean_rs', 0.0)) for row in post_rows])
+        summary['rs_post@k'] = _rate_optional(post_rows, 'mean_rs@k')
+        summary.update(_drop_affinity_summary(variant_rows))
         summary['num_order_groups'] = len(order_group_rows)
     return summary
 

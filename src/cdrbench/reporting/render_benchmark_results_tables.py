@@ -16,7 +16,7 @@ TRACK_SPECS = {
         'label': 'tab:atomic-results-all-models',
         'columns': (
             ('mean_rs', 'RS'),
-            ('mean_rs@3', 'Mean RS@3'),
+            ('mean_rs@k', 'Mean RS@K'),
             ('mean_rg', 'Mean RG'),
         ),
     },
@@ -25,7 +25,7 @@ TRACK_SPECS = {
         'label': 'tab:main-results-all-models',
         'columns': (
             ('mean_rs', 'RS'),
-            ('mean_rs@3', 'Mean RS@3'),
+            ('mean_rs@k', 'Mean RS@K'),
             ('mean_rg', 'Mean RG'),
         ),
     },
@@ -34,12 +34,12 @@ TRACK_SPECS = {
         'label': 'tab:order-sensitivity-results-all-models',
         'columns': (
             ('mean_rs', 'RS'),
-            ('mean_rs@3', 'Mean RS@3'),
+            ('mean_rs@k', 'Mean RS@K'),
             ('ocs', 'OCS'),
             ('ocs_at_k', 'OCS@K'),
-            ('rs_front', 'RS Front'),
-            ('rs_middle', 'RS Middle'),
-            ('rs_end', 'RS End'),
+            ('rs_pre', 'RS Pre'),
+            ('rs_mid', 'RS Mid'),
+            ('rs_post', 'RS Post'),
         ),
     },
 }
@@ -129,6 +129,13 @@ def _sort_value(row: dict[str, Any], metric_name: str) -> tuple[float, str]:
     return (metric, str(row.get('model') or ''))
 
 
+def _metric(payload: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        if key in payload:
+            return payload.get(key)
+    return None
+
+
 def _discover_track_rows(score_root: Path, track: str) -> list[dict[str, Any]]:
     rows = []
     for path in sorted(score_root.glob(f'*/{track}/paper_metrics.json')):
@@ -141,13 +148,13 @@ def _discover_track_rows(score_root: Path, track: str) -> list[dict[str, Any]]:
                 'model': model_name,
                 'source': _classify_model_source(model_name),
                 'mean_rs': payload.get('mean_rs'),
-                'mean_rs@3': payload.get('mean_rs@3'),
+                'mean_rs@k': _metric(payload, 'mean_rs@k', 'mean_rs@3'),
                 'mean_rg': payload.get('mean_rg'),
                 'ocs': payload.get('ocs'),
                 'ocs_at_k': payload.get('ocs_at_k'),
-                'rs_front': payload.get('rs_front'),
-                'rs_middle': payload.get('rs_middle'),
-                'rs_end': payload.get('rs_end'),
+                'rs_pre': _metric(payload, 'rs_pre', 'rs_front'),
+                'rs_mid': _metric(payload, 'rs_mid', 'rs_middle'),
+                'rs_post': _metric(payload, 'rs_post', 'rs_end'),
                 'source_path': str(path),
             }
         )
@@ -218,7 +225,7 @@ def main() -> None:
     parser.add_argument(
         '--sort-by',
         default='mean_rs',
-        choices=('mean_rs', 'mean_rs@3', 'mean_rg', 'ocs', 'ocs_at_k', 'model'),
+        choices=('mean_rs', 'mean_rs@k', 'mean_rg', 'ocs', 'ocs_at_k', 'model'),
         help='Primary sort key for rows inside each table.',
     )
     args = parser.parse_args()
