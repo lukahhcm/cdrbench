@@ -19,6 +19,7 @@ Options:
   --overwrite                  Overwrite prediction files in place. Default.
   --no-overwrite               Write sibling *.backfilled.jsonl files.
   --references-only            Only update reference_* fields.
+  --drop-missing               Drop prediction rows absent from benchmark.
   -h, --help                   Show help.
 
 Example:
@@ -41,6 +42,7 @@ PREDICTIONS_FILENAME=""
 PREDICTION_GLOBS=()
 OVERWRITE="true"
 REFERENCES_ONLY="false"
+DROP_MISSING="false"
 
 track_filename() {
   case "$1" in
@@ -162,6 +164,10 @@ while [[ $# -gt 0 ]]; do
       REFERENCES_ONLY="true"
       shift 1
       ;;
+    --drop-missing)
+      DROP_MISSING="true"
+      shift 1
+      ;;
     -h|--help)
       usage
       exit 0
@@ -207,6 +213,9 @@ for track in "${TRACKS[@]}"; do
     fi
     if [[ "${REFERENCES_ONLY}" == "true" ]]; then
       cmd+=(--references-only)
+    fi
+    if [[ "${DROP_MISSING}" == "true" ]]; then
+      cmd+=(--drop-missing)
     fi
     "${cmd[@]}"
     total=$((total + 1))

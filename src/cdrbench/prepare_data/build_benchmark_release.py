@@ -26,6 +26,8 @@ DOMAIN_METADATA = {
 RELEASE_FIELD_ORDER = [
     'instance_id',
     'benchmark_track',
+    'benchmark_track_label',
+    'recipe_order_setting',
     'domain',
     'domain_label',
     'domain_abbr',
@@ -67,6 +69,18 @@ RELEASE_FIELD_ORDER = [
     'accepted_style_count',
     'threshold_meta',
 ]
+
+TRACK_LABELS = {
+    'atomic_ops': 'Atomic OPs',
+    'main': 'Order-Agnostic Recipe',
+    'order_sensitivity': 'Order-Sensitive Recipe',
+}
+
+TRACK_ORDER_SETTINGS = {
+    'atomic_ops': 'atomic',
+    'main': 'order_agnostic',
+    'order_sensitivity': 'order_sensitive',
+}
 
 
 def _read_jsonl(path: Path) -> list[dict[str, Any]]:
@@ -152,6 +166,10 @@ def _canonical_domain(row: dict[str, Any]) -> str:
 
 def _ordered_row(row: dict[str, Any], *, keep_replay: bool) -> dict[str, Any]:
     release_row = dict(row)
+    track = str(release_row.get('benchmark_track') or '').strip()
+    if track in TRACK_LABELS:
+        release_row['benchmark_track_label'] = TRACK_LABELS[track]
+        release_row['recipe_order_setting'] = TRACK_ORDER_SETTINGS[track]
     domain = _canonical_domain(release_row)
     release_row['domain'] = domain
     if domain in DOMAIN_METADATA:
@@ -175,6 +193,28 @@ def _sequence(row: dict[str, Any]) -> list[str]:
         return [str(item) for item in sequence if str(item).strip()]
     operator = str(row.get('operator') or '').strip()
     return [operator] if operator else []
+
+
+def _has_filter(row: dict[str, Any]) -> bool:
+    filter_name = str(row.get('filter_name') or '').strip()
+    if filter_name:
+        return True
+    operator_kind = str(row.get('operator_kind') or '').strip().lower()
+    if operator_kind == 'filter':
+        return True
+    return any(op_name.endswith('_filter') for op_name in _sequence(row))
+
+
+def _filter_release_rows_for_track(track: str, rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    if track != 'main':
+        return rows, {'input_rows': len(rows), 'kept_rows': len(rows), 'dropped_rows': 0}
+    kept = [row for row in rows if not _has_filter(row)]
+    return kept, {
+        'input_rows': len(rows),
+        'kept_rows': len(kept),
+        'dropped_rows': len(rows) - len(kept),
+        'filter_reason': 'main release keeps mapper-only order-agnostic recipes',
+    }
 
 
 def _input_length_tier(row: dict[str, Any]) -> str:
@@ -302,6 +342,7 @@ def _prompt_distribution_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]
 def _write_release_statistics(output_dir: Path, track: str, rows: list[dict[str, Any]]) -> dict[str, Any]:
     stats_dir = output_dir / 'stats'
     task_track_rows = _count_rows(rows, ['benchmark_track'])
+    task_order_setting_rows = _count_rows(rows, ['recipe_order_setting'])
     task_difficulty_rows = _count_rows(rows, ['difficulty_label'])
     task_difficulty_grid_rows = _count_rows(rows, ['recipe_length_label', 'input_length_bucket', 'difficulty_label'])
     task_domain_rows = _count_rows(rows, ['domain'])
@@ -314,6 +355,7 @@ def _write_release_statistics(output_dir: Path, track: str, rows: list[dict[str,
     recipe_rows = _recipe_distribution_rows(rows)
 
     _write_csv(stats_dir / f'{track}_task_track_distribution.csv', task_track_rows)
+    _write_csv(stats_dir / f'{track}_task_order_setting_distribution.csv', task_order_setting_rows)
     _write_csv(stats_dir / f'{track}_task_difficulty_distribution.csv', task_difficulty_rows)
     _write_csv(stats_dir / f'{track}_task_difficulty_grid_distribution.csv', task_difficulty_grid_rows)
     _write_csv(stats_dir / f'{track}_task_domain_distribution.csv', task_domain_rows)
@@ -328,6 +370,7 @@ def _write_release_statistics(output_dir: Path, track: str, rows: list[dict[str,
     return {
         'task': {
             'track_distribution': task_track_rows,
+            'order_setting_distribution': task_order_setting_rows,
             'difficulty_distribution': task_difficulty_rows,
             'difficulty_grid_distribution': task_difficulty_grid_rows,
             'domain_distribution': task_domain_rows,
@@ -381,6 +424,11 @@ def main() -> None:
             },
             'recipe_length_labeling': {'short': '<=2 operators', 'medium': '3-4 operators', 'long': '>=5 operators'},
         },
+        'track_definition': {
+            'atomic_ops': 'single-operator calibration baseline',
+            'main': 'order-agnostic mapper-only compositional recipes',
+            'order_sensitivity': 'order-sensitive recipes with a filter placed at pre/mid/post positions',
+        },
         'tracks': {},
     }
 
@@ -399,6 +447,14 @@ def main() -> None:
             if args.progress_every > 0 and (index % args.progress_every == 0 or index == total_rows):
                 print(f'progress release build track={track} row={index}/{total_rows}', flush=True)
 
+        release_rows, filter_summary = _filter_release_rows_for_track(track, release_rows)
+        if filter_summary.get('dropped_rows'):
+            print(
+                f'filtered release track={track}: kept={filter_summary["kept_rows"]} '
+                f'dropped={filter_summary["dropped_rows"]} reason={filter_summary.get("filter_reason")}',
+                flush=True,
+            )
+
         scored_rows = _attach_difficulty(release_rows)
         output_rows = [_ordered_row(row, keep_replay=bool(args.keep_replay)) for row in scored_rows]
         for output_row in output_rows:
@@ -414,6 +470,7 @@ def main() -> None:
             'input_path': str(input_path),
             'output_path': str(output_path),
             'rows': count,
+            'row_filtering': filter_summary,
             'domain_counts': dict(sorted(domain_counts.items())),
             'statistics': stats_summary,
         }

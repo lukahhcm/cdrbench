@@ -12,6 +12,7 @@ from urllib.parse import urlparse
 
 import yaml
 
+from cdrbench.eval.prediction_io import ordered_prediction_row
 from cdrbench.infer.openai_infer import make_api_infer, make_vllm_infer
 from cdrbench.llm_utils import parse_json_response, resolve_api_key, resolve_base_url, resolve_model
 from cdrbench.prepare_data.build_benchmark_release import RELEASE_FIELD_ORDER
@@ -54,15 +55,6 @@ NON_SCORING_REFUSAL_PATTERNS = (
     re.compile(r'violates? policy', re.IGNORECASE),
     re.compile(r'policy restrictions?', re.IGNORECASE),
 )
-PREDICTION_FIELD_ORDER = [
-    'request_model',
-    'request_base_url',
-    'prompt_mode',
-    'selected_prompt_variant_indices',
-    'variant_predictions',
-]
-
-
 def _stable_json(payload: Any) -> str:
     return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
 
@@ -106,7 +98,7 @@ def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
     tmp_path = path.with_suffix(path.suffix + '.tmp')
     with tmp_path.open('w', encoding='utf-8') as handle:
         for row in rows:
-            handle.write(json.dumps(_ordered_prediction_row(row), ensure_ascii=False) + '\n')
+            handle.write(json.dumps(ordered_prediction_row(row), ensure_ascii=False) + '\n')
     tmp_path.replace(path)
 
 
@@ -165,20 +157,6 @@ def _copy_recipe_identity_fields(row: dict[str, Any]) -> dict[str, Any]:
         'recipe_variant_id': _first_present(row, 'recipe_variant_id', 'workflow_variant_id'),
         'recipe_type': _first_present(row, 'recipe_type', 'workflow_type'),
     }
-
-
-def _ordered_prediction_row(row: dict[str, Any]) -> dict[str, Any]:
-    ordered: dict[str, Any] = {}
-    for key in RELEASE_FIELD_ORDER:
-        if key in row:
-            ordered[key] = row[key]
-    for key in PREDICTION_FIELD_ORDER:
-        if key in row and key not in ordered:
-            ordered[key] = row[key]
-    for key, value in row.items():
-        if key not in ordered:
-            ordered[key] = value
-    return ordered
 
 
 def _resolved_api_key(explicit_api_key: str | None, base_url: str) -> str:

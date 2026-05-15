@@ -606,7 +606,20 @@ def _summary_report_text(summary: dict[str, Any]) -> str:
         parts.append(f"ocs_at_k={float(summary.get('ocs_at_k', 0.0)):.4f}")
         parts.append(f"ocs_strict={float(summary.get('ocs_strict', 0.0)):.4f}")
         parts.append(f"ocs_at_k_strict={float(summary.get('ocs_at_k_strict', 0.0)):.4f}")
-    for key in ('rs_pre', 'rs_pre@k', 'rs_mid', 'rs_mid@k', 'rs_post', 'rs_post@k'):
+    for key in (
+        'rs_pre',
+        'rs_pre@k',
+        'rp_pre',
+        'rc_pre',
+        'rs_mid',
+        'rs_mid@k',
+        'rp_mid',
+        'rc_mid',
+        'rs_post',
+        'rs_post@k',
+        'rp_post',
+        'rc_post',
+    ):
         if key in summary:
             parts.append(f"{key}={float(summary.get(key, 0.0)):.4f}")
     for key in (
@@ -660,10 +673,16 @@ def _paper_metrics_payload(summary: dict[str, Any]) -> dict[str, Any]:
         'ocs_at_k_strict',
         'rs_pre',
         'rs_pre@k',
+        'rp_pre',
+        'rc_pre',
         'rs_mid',
         'rs_mid@k',
+        'rp_mid',
+        'rc_mid',
         'rs_post',
         'rs_post@k',
+        'rp_post',
+        'rc_post',
         'drop_affinity_count',
         'drop_full_run_closer_rate',
         'drop_stop_closer_rate',
@@ -764,6 +783,16 @@ def _drop_affinity_summary(variant_rows: list[dict[str, Any]]) -> dict[str, Any]
         summary[f'drop_stop_closer_{slot}'] = slot_rates['stop_closer_rate']
         summary[f'drop_tie_{slot}'] = slot_rates['tie_rate']
     return summary
+
+
+def _order_slot_metric_summary(rows: list[dict[str, Any]], slot: str) -> dict[str, Any]:
+    slot_rows = [row for row in rows if _canonical_order_slot(row.get('order_slot')) == slot]
+    return {
+        f'rs_{slot}': _safe_mean([float(row.get('mean_rs', 0.0)) for row in slot_rows]),
+        f'rs_{slot}@k': _rate_optional(slot_rows, 'mean_rs@k'),
+        f'rp_{slot}': _mean_optional([row.get('mean_refinement_progress') for row in slot_rows]),
+        f'rc_{slot}': _mean_optional([row.get('mean_edit_calibration') for row in slot_rows]),
+    }
 
 
 def _plot_order_drop_stop_vs_full(
@@ -901,15 +930,8 @@ def _build_summary(
         summary['ocs_at_k'] = _rate_optional(order_group_rows, 'ocs_at_k')
         summary['ocs_strict'] = _rate_optional(order_group_rows, 'ocs_strict')
         summary['ocs_at_k_strict'] = _rate_optional(order_group_rows, 'ocs_at_k_strict')
-        pre_rows = [row for row in instance_rows if _canonical_order_slot(row.get('order_slot')) == 'pre']
-        mid_rows = [row for row in instance_rows if _canonical_order_slot(row.get('order_slot')) == 'mid']
-        post_rows = [row for row in instance_rows if _canonical_order_slot(row.get('order_slot')) == 'post']
-        summary['rs_pre'] = _safe_mean([float(row.get('mean_rs', 0.0)) for row in pre_rows])
-        summary['rs_pre@k'] = _rate_optional(pre_rows, 'mean_rs@k')
-        summary['rs_mid'] = _safe_mean([float(row.get('mean_rs', 0.0)) for row in mid_rows])
-        summary['rs_mid@k'] = _rate_optional(mid_rows, 'mean_rs@k')
-        summary['rs_post'] = _safe_mean([float(row.get('mean_rs', 0.0)) for row in post_rows])
-        summary['rs_post@k'] = _rate_optional(post_rows, 'mean_rs@k')
+        for slot in ('pre', 'mid', 'post'):
+            summary.update(_order_slot_metric_summary(instance_rows, slot))
         summary.update(_drop_affinity_summary(variant_rows))
         summary['num_order_groups'] = len(order_group_rows)
     return summary

@@ -7,16 +7,8 @@ import sys
 from pathlib import Path
 from typing import Any, Iterable
 
+from cdrbench.eval.prediction_io import ordered_prediction_row
 from cdrbench.prepare_data.build_benchmark_release import RELEASE_FIELD_ORDER
-
-
-PREDICTION_FIELD_ORDER = [
-    'request_model',
-    'request_base_url',
-    'prompt_mode',
-    'selected_prompt_variant_indices',
-    'variant_predictions',
-]
 
 
 REFERENCE_BACKFILL_FIELDS = [
@@ -50,27 +42,13 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
-def _ordered_prediction_row(row: dict[str, Any]) -> dict[str, Any]:
-    ordered: dict[str, Any] = {}
-    for key in RELEASE_FIELD_ORDER:
-        if key in row:
-            ordered[key] = row[key]
-    for key in PREDICTION_FIELD_ORDER:
-        if key in row and key not in ordered:
-            ordered[key] = row[key]
-    for key, value in row.items():
-        if key not in ordered:
-            ordered[key] = value
-    return ordered
-
-
 def _write_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> int:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path = path.with_suffix(path.suffix + '.tmp')
     count = 0
     with tmp_path.open('w', encoding='utf-8') as handle:
         for row in rows:
-            handle.write(json.dumps(_ordered_prediction_row(row), ensure_ascii=False) + '\n')
+            handle.write(json.dumps(ordered_prediction_row(row), ensure_ascii=False) + '\n')
             count += 1
     tmp_path.replace(path)
     return count
@@ -100,11 +78,13 @@ def _backfill_rows(
     benchmark_rows: list[dict[str, Any]],
     prediction_rows: list[dict[str, Any]],
     fields: list[str],
+    drop_missing: bool,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     benchmark_by_id = _index_benchmark_rows(benchmark_rows)
     output_rows: list[dict[str, Any]] = []
     matched = 0
     missing = 0
+    dropped_missing = 0
     changed_rows = 0
     changed_field_counts: dict[str, int] = {}
 
@@ -113,7 +93,10 @@ def _backfill_rows(
         benchmark_row = benchmark_by_id.get(instance_id)
         if benchmark_row is None:
             missing += 1
-            output_rows.append(dict(row))
+            if drop_missing:
+                dropped_missing += 1
+            else:
+                output_rows.append(dict(row))
             continue
 
         matched += 1
@@ -134,6 +117,7 @@ def _backfill_rows(
         'prediction_rows': len(prediction_rows),
         'matched_by_instance_id': matched,
         'missing_in_benchmark': missing,
+        'dropped_missing_in_benchmark': dropped_missing,
         'changed_rows': changed_rows,
         'changed_field_counts': changed_field_counts,
     }
@@ -152,6 +136,11 @@ def main() -> None:
         '--references-only',
         action='store_true',
         help='Only update reference_* fields. Default updates benchmark/release fields plus references.',
+    )
+    parser.add_argument(
+        '--drop-missing',
+        action='store_true',
+        help='Drop prediction rows whose instance_id is not present in the refreshed benchmark.',
     )
     args = parser.parse_args()
 
@@ -176,6 +165,7 @@ def main() -> None:
         benchmark_rows=_read_jsonl(benchmark_path),
         prediction_rows=_read_jsonl(predictions_path),
         fields=fields,
+        drop_missing=bool(args.drop_missing),
     )
     written = _write_jsonl(output_path, output_rows)
 
@@ -191,6 +181,7 @@ def main() -> None:
                 f'written_rows={written}',
                 f'matched_by_instance_id={stats["matched_by_instance_id"]}',
                 f'missing_in_benchmark={stats["missing_in_benchmark"]}',
+                f'dropped_missing_in_benchmark={stats["dropped_missing_in_benchmark"]}',
                 f'changed_rows={stats["changed_rows"]}',
             ]
         ),

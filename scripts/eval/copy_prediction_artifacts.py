@@ -15,6 +15,7 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from cdrbench.prepare_data.build_benchmark_release import RELEASE_FIELD_ORDER
+from cdrbench.eval.prediction_io import ordered_prediction_row
 
 
 DEFAULT_PATTERNS = (
@@ -44,15 +45,6 @@ EXCLUDED_METADATA_KEYWORDS = (
     'analysis',
 )
 
-PREDICTION_FIELD_ORDER = [
-    'request_model',
-    'request_base_url',
-    'prompt_mode',
-    'selected_prompt_variant_indices',
-    'variant_predictions',
-]
-
-
 def _iter_prediction_files(root: Path, patterns: list[str]) -> list[Path]:
     files: set[Path] = set()
     for pattern in patterns:
@@ -75,25 +67,11 @@ def _iter_metadata_files(root: Path, patterns: list[str]) -> list[Path]:
     return sorted(path for path in files if not _is_score_like_metadata(path))
 
 
-def _ordered_prediction_row(row: dict[str, Any]) -> dict[str, Any]:
-    ordered: dict[str, Any] = {}
-    for key in RELEASE_FIELD_ORDER:
-        if key in row:
-            ordered[key] = row[key]
-    for key in PREDICTION_FIELD_ORDER:
-        if key in row and key not in ordered:
-            ordered[key] = row[key]
-    for key, value in row.items():
-        if key not in ordered:
-            ordered[key] = value
-    return ordered
-
-
 def _normalize_payload(payload: Any) -> Any:
     if isinstance(payload, dict):
-        return _ordered_prediction_row(payload)
+        return ordered_prediction_row(payload)
     if isinstance(payload, list):
-        return [_ordered_prediction_row(item) if isinstance(item, dict) else item for item in payload]
+        return [ordered_prediction_row(item) if isinstance(item, dict) else item for item in payload]
     return payload
 
 
