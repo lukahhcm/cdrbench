@@ -781,6 +781,19 @@ def _resume_seed_output_path(output_path: Path, *, sample_size: int) -> Path | N
     return output_path.with_name(match.group(1) + output_path.suffix)
 
 
+def _load_existing_rows_by_id(paths: list[Path]) -> dict[str, dict[str, Any]]:
+    existing_rows_by_id: dict[str, dict[str, Any]] = {}
+    for path in paths:
+        if not path.exists():
+            continue
+        for row in _read_jsonl(path):
+            row = _normalize_existing_prediction_row(row)
+            instance_id = str(row.get('instance_id') or '')
+            if instance_id:
+                existing_rows_by_id[instance_id] = row
+    return existing_rows_by_id
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description='Run CDR-Bench inference on eval-ready JSONL and save raw predictions.')
     parser.add_argument('--eval-path', required=True)
@@ -846,44 +859,44 @@ def main() -> None:
     infer_backend = _build_infer_backend(args, model, base_url, api_key)
 
     existing_rows_by_id: dict[str, dict[str, Any]] = {}
-    resume_source_path = output_path
-    if args.resume and not output_path.exists():
+    resume_source_paths: list[Path] = []
+    fallback_output_path = None
+    if args.resume:
         fallback_output_path = _resume_seed_output_path(
             output_path,
             sample_size=int(args.prompt_variant_sample_size),
         )
         if fallback_output_path is not None and fallback_output_path.exists():
-            resume_source_path = fallback_output_path
+            resume_source_paths.append(fallback_output_path)
+        if output_path.exists():
+            resume_source_paths.append(output_path)
+        existing_rows_by_id = _load_existing_rows_by_id(resume_source_paths)
+        if fallback_output_path is not None and fallback_output_path.exists():
             print(
                 f'resume seed source detected for sampled infer: '
-                f'output_path={output_path} resume_source_path={resume_source_path}',
+                f'output_path={output_path} fallback_resume_source_path={fallback_output_path} '
+                f'active_resume_sources={[str(path) for path in resume_source_paths]}',
                 flush=True,
             )
-    if args.resume and resume_source_path.exists():
-        for row in _read_jsonl(resume_source_path):
-            row = _normalize_existing_prediction_row(row)
-            instance_id = str(row.get('instance_id') or '')
-            if instance_id:
-                existing_rows_by_id[instance_id] = row
     if args.resume_only_existing_rows:
         if not args.resume:
             raise SystemExit('--resume-only-existing-rows requires --resume.')
-        if not resume_source_path.exists():
+        if not resume_source_paths:
             raise SystemExit(
-                '--resume-only-existing-rows requires an existing resume source file; '
-                f'predictions file not found: {resume_source_path}'
+                '--resume-only-existing-rows requires at least one existing resume source file; '
+                f'checked output_path={output_path} fallback_output_path={fallback_output_path}'
             )
         existing_instance_ids = set(existing_rows_by_id)
         if not existing_instance_ids:
             raise SystemExit(
                 '--resume-only-existing-rows requires at least one existing prediction row; '
-                f'no instance_ids found in {resume_source_path}'
+                f'no instance_ids found in resume sources: {[str(path) for path in resume_source_paths]}'
             )
         original_row_count = len(rows)
         rows = [row for row in rows if str(row.get('instance_id') or '') in existing_instance_ids]
         print(
             f'resume scope limited to existing predictions rows={len(rows)}/{original_row_count} '
-            f'resume_source_path={resume_source_path} output_path={output_path}',
+            f'resume_source_paths={[str(path) for path in resume_source_paths]} output_path={output_path}',
             flush=True,
         )
 
